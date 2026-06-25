@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>深度行研 · 实时</title>
+<style>
+:root{--green:#6fae7e;--green-d:#4f8a60;--ink:#23282b;--mut:#7d878c;--line:#e7e9e8;--bg:#f6f7f5;--card:#fff}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+/* ---- 冷启动面板 ---- */
+#cold{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:radial-gradient(1200px 600px at 50% 30%,#fbfdfc,#eef1ee);z-index:10;transition:opacity .6s,transform .6s}
+#cold.gone{opacity:0;transform:scale(1.04);pointer-events:none}
+#cold h1{font-size:34px;margin:0 0 6px;letter-spacing:1px}
+#cold .tag{color:var(--mut);margin-bottom:30px;font-size:13px;letter-spacing:3px}
+.panel{width:min(560px,90vw);background:#fff;border:1px solid var(--line);border-radius:16px;padding:26px 28px;box-shadow:0 10px 40px rgba(80,110,90,.10)}
+.panel label{display:block;font-size:12px;color:var(--mut);margin:14px 0 5px;letter-spacing:1px}
+.panel input,.panel textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-size:15px;outline:none;transition:.15s;font-family:inherit}
+.panel textarea{resize:vertical;line-height:1.5}
+.panel input:focus,.panel textarea:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(111,174,126,.15)}
+.panel .hintline{font-size:11.5px;color:#a7aeaa;margin-top:4px}
+.go{margin-top:22px;width:100%;padding:13px;border:none;border-radius:11px;background:var(--green);color:#fff;
+  font-size:16px;font-weight:700;letter-spacing:4px;cursor:pointer;transition:.18s}
+.go:hover{background:var(--green-d)}
+.go:disabled{opacity:.5;cursor:not-allowed}
+/* ---- 主界面 ---- */
+#app{height:100vh;opacity:0;transition:opacity .7s}
+#app.lit{opacity:1}
+.wrap{display:grid;grid-template-columns:minmax(300px,38%) 1fr;height:100vh}
+.left{padding:30px 28px;overflow:auto;border-right:1px solid var(--line);background:#fbfcfb}
+.left h1{font-size:26px;line-height:1.25;margin:0 0 4px}
+.left .sub{color:var(--mut);font-size:12.5px;margin-bottom:22px}
+.left h4{font-size:12px;letter-spacing:2px;color:var(--green);margin:0 0 12px;font-weight:700}
+ul.kp{list-style:none;margin:0;padding:0}
+ul.kp li{padding:11px 11px;border-radius:10px;cursor:pointer;display:grid;grid-template-columns:24px 1fr;gap:3px 10px;border:1px solid transparent;transition:.15s;opacity:.45}
+ul.kp li.filled{opacity:1}
+ul.kp li:hover{background:#fff;border-color:var(--line)}
+ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px rgba(111,174,126,.15)}
+.kp-no{grid-row:1/3;width:24px;height:24px;border-radius:50%;background:#cdd5cf;color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;font-weight:700;transition:.2s}
+li.filled .kp-no{background:var(--green)}
+.kp-name{font-weight:600;font-size:13.5px}
+.kp-con{color:var(--mut);font-size:12px;line-height:1.5}
+.right{position:relative;overflow:hidden;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:10px;padding:10px 18px;border-bottom:1px solid var(--line);background:#fbfcfb;font-size:13px;color:var(--mut)}
+.breath{width:11px;height:11px;border-radius:50%;background:#cdd5cf;display:inline-block;flex:none}
+.breath.on{background:var(--green);animation:breathe 1.7s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:.3;transform:scale(.8);box-shadow:0 0 0 0 rgba(111,174,126,.5)}50%{opacity:1;transform:scale(1.2);box-shadow:0 0 0 7px rgba(111,174,126,0)}}
+.stage{flex:1;overflow:hidden;position:relative}
+.track{display:flex;height:100%;will-change:transform;cursor:grab}
+.track.drag{cursor:grabbing}.track.snap{transition:transform .42s cubic-bezier(.22,.61,.36,1)}
+.card{min-width:100%;height:100%;overflow:auto;padding:34px 48px 56px;transition:box-shadow .3s}
+.card.active{box-shadow:inset 3px 0 0 var(--green)}
+.card-head{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin-bottom:13px}
+.card-head .no{width:32px;height:32px;border-radius:9px;background:#cdd5cf;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;transition:.25s}
+.card.done .card-head .no,.card.active .card-head .no{background:var(--ink)}
+.card-head h2{margin:0;font-size:21px}
+.tag{font-size:12px;background:#eef5f0;color:var(--green);padding:3px 10px;border-radius:20px;font-weight:600}
+.dep{font-size:12px;color:var(--mut);border:1px solid var(--line);padding:3px 9px;border-radius:20px}
+.concl{background:#fff;border-left:3px solid var(--green);padding:13px 17px;border-radius:0 10px 10px 0;font-size:15px;line-height:1.7;margin-bottom:20px;font-weight:500;display:none}
+.concl.show{display:block}
+.body{font-size:14.5px;line-height:1.85;color:#2c3236;white-space:pre-wrap;transition:opacity .25s}
+.body.fmt{white-space:normal}
+.body.fading{opacity:0}
+.pi-badge{display:inline-block;font-size:12px;font-weight:700;color:#fff;background:var(--green);padding:4px 13px;border-radius:20px;margin-bottom:16px;letter-spacing:1px}
+.plan-list{list-style:none;margin:0;padding:0}
+.plan-list li{padding:10px 0;border-bottom:1px solid var(--line)}
+.pi-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pi-no{width:22px;height:22px;border-radius:50%;background:var(--green);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;font-weight:700;flex:none}
+.pi-instr{font-size:12.5px;color:var(--mut);margin:6px 0 0 30px;line-height:1.55}
+.pi-rub{font-size:12px;color:var(--green-d);margin:4px 0 0 30px}
+.pi-search{font-size:11px;background:#eef5f0;color:var(--green-d);padding:2px 7px;border-radius:10px;font-weight:600}
+.pl-sec{margin:0 0 16px;font-size:14px;line-height:1.8}
+.pl-k{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--green);padding:2px 9px;border-radius:11px;margin-right:8px;vertical-align:1px;letter-spacing:1px}
+@keyframes flashpulse{0%{box-shadow:inset 0 0 0 2px var(--green);background:#f3f9f5}100%{box-shadow:inset 0 0 0 0 transparent;background:transparent}}
+.card.flash{animation:flashpulse 1s ease-out}
+.card.err{box-shadow:inset 3px 0 0 #c0392b}
+.err-msg{color:#c0392b;font-size:14px;margin:18px 0}
+.retry-btn{border:1px solid #c0392b;background:#fff;color:#c0392b;padding:9px 18px;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer}
+.retry-btn:hover{background:#c0392b;color:#fff}
+.mini-retry{margin-left:auto;border:1px solid var(--line);background:#fff;color:var(--mut);
+  width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:14px;flex:none;transition:.15s}
+.mini-retry:hover{border-color:var(--green);color:var(--green)}
+.topbtn{border:1px solid var(--line);background:#fff;color:var(--mut);padding:4px 11px;border-radius:8px;
+  cursor:pointer;font-size:12.5px;margin-left:auto;flex:none;transition:.15s}
+.topbtn:hover{border-color:var(--green);color:var(--green-d)}
+.dot.err{background:#c0392b}
+.body.streaming::after{content:"▍";color:var(--green);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.body h3,.body h4,.body h5,.body h6{margin:20px 0 8px;font-size:15px}
+.body p{margin:9px 0}.body ul{margin:8px 0;padding-left:22px}.body li{margin:4px 0}.body b{color:var(--ink)}
+.tbl-wrap{overflow-x:auto;margin:13px 0}
+.body table{border-collapse:collapse;width:100%;font-size:13px}
+.body th,.body td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top;word-break:break-word}
+.body th{background:#f1f4f2;font-weight:600}.body tr:nth-child(even) td{background:#fbfcfb}
+.body sub,.body sup{font-size:.72em}
+.sources{margin-top:24px;padding-top:15px;border-top:1px dashed var(--line)}
+.sources h4{font-size:12px;letter-spacing:2px;color:var(--green);margin:0 0 9px;font-weight:700}
+.sources ol{margin:0;padding-left:22px;font-size:13px;line-height:1.7}.sources li{margin:5px 0}
+.sources a{color:#2c3236;text-decoration:none}.sources a:hover{text-decoration:underline}
+.src-link{color:var(--green-d)!important;font-weight:600;margin:0 6px}
+.src-meta{color:var(--mut);font-size:12px;margin-left:4px}
+.placeholder{color:#b9c0bb;font-size:14px;padding-top:20px}
+.nav{display:flex;align-items:center;justify-content:center;gap:14px;padding:11px;border-top:1px solid var(--line);background:#fbfcfb}
+.nav button.arrow{border:1px solid var(--line);background:#fff;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:17px;color:var(--ink)}
+.nav button.arrow:hover{border-color:var(--green);color:var(--green)}
+.dots{display:flex;gap:7px}.dot{width:9px;height:9px;border-radius:50%;border:none;background:#d3d8d4;cursor:pointer;padding:0;transition:.2s}
+.dot.active{background:var(--green);transform:scale(1.3)}.dot.done{background:var(--green-d)}
+.pos{font-size:12px;color:var(--mut);min-width:52px;text-align:center}
+.saved{font-size:12px;color:var(--green-d)}
+</style></head>
+<body>
+
+<div id="cold">
+  <h1>深度行研 Agent</h1>
+  <div class="tag">Claude 设计 · DeepSeek 驱动 · 会呼吸的研究</div>
+  <div class="panel">
+    <label>研究主题</label>
+    <input id="topic" placeholder="例如:anti fouling / AEM电解水制氢 / 固态电池硅碳负极" autofocus>
+    <label>补充说明(选填)</label>
+    <textarea id="detail" rows="2" placeholder="界定范围 / 侧重 / 背景。例如:物理、化学、机械方法均可"></textarea>
+    <div class="hintline">会和主题一起进规划与每一步研究,帮它聚焦或放宽边界。</div>
+    <label>LLM API Key(可选)</label>
+    <input id="llmkey" type="password" placeholder="留空 → 用本地 deepseek_api.json">
+    <label>搜索 API Key(可选)</label>
+    <input id="searchkey" type="password" placeholder="留空 → 用本地 bocha_api.json(没有则新闻步走模型知识)">
+    <button class="go" id="goBtn">点 亮</button>
+    <div class="hintline">key 只发往本机服务,不写入页面、不上传第三方。</div>
+  </div>
+</div>
+
+<div id="app" hidden><div class="wrap">
+  <aside class="left">
+    <h1 id="topicTitle"></h1>
+    <div class="sub">深度研究 · 实时思考链</div>
+    <h4>核心要点</h4>
+    <ul class="kp" id="kp"></ul>
+  </aside>
+  <section class="right">
+    <div class="topbar"><span class="breath" id="breath"></span><span id="statusText">待命</span><span class="saved" id="saved"></span><button class="topbtn" id="resumeBtn" title="断点续跑:跳过已完成步,重试规划/未完成步">↻ 重试 / 继续</button></div>
+    <div class="stage"><div class="track snap" id="track"></div></div>
+    <div class="nav">
+      <button class="arrow" id="prev">‹</button>
+      <div class="dots" id="dots"></div>
+      <span class="pos" id="pos"></span>
+      <button class="arrow" id="next">›</button>
+    </div>
+  </section>
+</div></div>
+
+<script>
+var track=document.getElementById("track"), dotsEl=document.getElementById("dots"),
+    kpEl=document.getElementById("kp"), breath=document.getElementById("breath"),
+    statusText=document.getElementById("statusText"), savedEl=document.getElementById("saved");
+var cards={}, order=[], i=0, w=0, dx=0, dragging=false, startX=0;
+var TOPIC="", DETAIL="", LLMKEY="", SEARCHKEY="";   // 供 retryStep 复用
+
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function setStatus(t,on){statusText.textContent=t;breath.classList.toggle("on",!!on)}
+function measure(){w=track.clientWidth;render(false)}
+function render(anim){track.classList.toggle("snap",!!anim);track.style.transform="translateX("+(-i*w+dx)+"px)";
+  var pos=document.getElementById("pos"); if(pos)pos.textContent=(i+1)+" / "+order.length;
+  [].forEach.call(dotsEl.children,function(d,k){d.classList.toggle("active",k===i)});
+  [].forEach.call(kpEl.children,function(li){li.classList.toggle("active",+li.dataset.idx===i)});}
+function go(n){i=Math.max(0,Math.min(order.length-1,n));dx=0;render(true)}
+
+function flash(el){el.classList.remove("flash");void el.offsetWidth;el.classList.add("flash");}
+function bodyEl(c){return c.el.querySelector(".body");}
+
+function addCard(key,headHtml,bodyHtml){
+  var idx=order.length; order.push(key);
+  var el=document.createElement("article"); el.className="card"; el.dataset.idx=idx;
+  el.innerHTML='<div class="card-head">'+headHtml+'</div><div class="concl"></div>'+
+    '<div class="body fmt">'+(bodyHtml||'<div class="placeholder">规划中…</div>')+'</div>';
+  track.appendChild(el);
+  var dot=document.createElement("button"); dot.className="dot"; dot.dataset.i=idx;
+  dot.onclick=function(){go(idx)}; dotsEl.appendChild(dot);
+  cards[key]={el:el,dot:dot,idx:idx}; measure(); return cards[key];
+}
+function stepHead(s){
+  var tag=s.type?'<span class="tag">'+esc(s.type)+'</span>':'';
+  var dep=(s.depends_on&&s.depends_on.length)?'<span class="dep">依赖 '+s.depends_on.join(",")+'</span>':'';
+  var sr=s.need_search?'<span class="pi-search">🔍 检索</span>':'';
+  var rb='<button class="mini-retry" title="重试此页" onclick="retryStep('+s.id+')">↻</button>';
+  return '<span class="no">'+s.id+'</span><h2>'+esc(s.name)+'</h2>'+tag+dep+sr+rb;
+}
+function planBody(s){           // 整页、完整文本、不截断
+  var p=[];
+  if(s.instruction)p.push('<div class="pl-sec"><span class="pl-k">范围</span>'+esc(s.instruction)+'</div>');
+  if(s.quality_rubric)p.push('<div class="pl-sec"><span class="pl-k">质量判据</span>'+esc(s.quality_rubric)+'</div>');
+  if(s.search_queries&&s.search_queries.length)p.push('<div class="pl-sec"><span class="pl-k">检索词</span>'+esc(s.search_queries.join(" / "))+'</div>');
+  return p.length?p.join(""):'<div class="placeholder">规划中…</div>';
+}
+function ensureCards(steps){
+  if(cards["think"])return;
+  addCard("think",'<span class="no">思</span><h2>深度思考</h2>','<div class="placeholder">思考中…</div>');
+  steps.forEach(function(s){
+    var c=addCard("s"+s.id,stepHead(s),planBody(s));
+    var li=document.createElement("li"); li.dataset.idx=c.idx; li.dataset.no=s.id;
+    li.innerHTML='<span class="kp-no">'+s.id+'</span><span class="kp-name">'+esc(s.name)+'</span><span class="kp-con">规划中…</span>';
+    li.onclick=function(){go(c.idx)}; kpEl.appendChild(li);
+  });
+}
+function renderThink(dt){
+  var c=cards["think"]; if(!c||!dt)return;
+  bodyEl(c).innerHTML='<h3>主题研判</h3><p>'+esc(dt.context_analysis||"")+'</p>'+
+    '<h3>研究计划</h3><p>'+esc(dt.research_plan||"")+'</p>'+
+    '<h3>范围拆解</h3><p>'+esc(dt.scope_decomposition||"")+'</p>';
+}
+function applyPlanIter(ev){     // 整页刷新 + 闪动;等待下一轮时可翻看本轮全文
+  var first=!cards["think"];
+  ensureCards(ev.plan.steps);
+  renderThink(ev.plan.deep_thinking);
+  if(first)flash(cards["think"].el);
+  ev.plan.steps.forEach(function(s){
+    var c=cards["s"+s.id]; if(!c)return;
+    c.el.querySelector(".card-head").innerHTML=stepHead(s);
+    bodyEl(c).innerHTML=planBody(s); flash(c.el);
+  });
+}
+
+function handle(ev){
+  if(ev.type==="status"){setStatus(ev.msg,true);}
+  else if(ev.type==="plan_iter"){applyPlanIter(ev);}
+  else if(ev.type==="meta"){setStatus("规划完成,开始研究…",true);}
+  else if(ev.type==="step_start"){var c=cards["s"+ev.id];
+    if(c){c.el.classList.add("active");bodyEl(c).innerHTML='<div class="placeholder">研究中…</div>';flash(c.el);go(c.idx);}
+    setStatus("步骤 "+ev.id+" 研究中…",true);}
+  else if(ev.type==="step_status"){setStatus("步骤 "+ev.id+":"+ev.msg,true);}
+  else if(ev.type==="step_done"){var c=cards["s"+ev.id];
+    if(c){bodyEl(c).innerHTML=ev.detailed_html;
+      var cc=c.el.querySelector(".concl");cc.textContent=ev.conclusion;cc.classList.add("show");
+      c.el.classList.remove("active");c.el.classList.remove("err");c.el.classList.add("done");c.dot.classList.add("done");c.dot.classList.remove("err");flash(c.el);}
+    var li=[].find.call(kpEl.children,function(x){return +x.dataset.no===ev.id});
+    if(li){li.classList.add("filled");li.querySelector(".kp-con").textContent=ev.conclusion;}}
+  else if(ev.type==="step_error"){var c=cards["s"+ev.id];
+    if(c){c.el.classList.remove("active");c.el.classList.add("err");c.dot.classList.add("err");
+      bodyEl(c).innerHTML='<p class="err-msg">⚠ 失败:'+esc(ev.msg)+'</p>'+
+        '<button class="retry-btn" onclick="retryStep('+ev.id+')">↻ 重试此步</button>';flash(c.el);}
+    var li=[].find.call(kpEl.children,function(x){return +x.dataset.no===ev.id});
+    if(li)li.querySelector(".kp-con").textContent="⚠ 失败,可重试";
+    setStatus("步骤 "+ev.id+" 失败——可点该卡片内按钮重试",false);}
+  else if(ev.type==="saved"){savedEl.textContent="已保存 "+ev.plan+" / report.html";}
+  else if(ev.type==="done"){setStatus("研究完成 ✓",false);}
+  else if(ev.type==="error"){setStatus("出错:"+ev.msg,false);
+    var cur=cards[order[i]]; if(cur)bodyEl(cur).innerHTML='<p class="err-msg">'+esc(ev.msg)+'</p>';}
+}
+
+async function retryStep(id){
+  var c=cards["s"+id]; if(!c)return;
+  go(c.idx); setStatus("步骤 "+id+" 重试中…",true);
+  c.el.classList.remove("err");c.el.classList.add("active");
+  bodyEl(c).innerHTML='<div class="placeholder">重试中…</div>'; flash(c.el);
+  try{
+    var resp=await fetch("/retry",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({topic:TOPIC,id:id,llm_key:LLMKEY,search_key:SEARCHKEY})});
+    handle(await resp.json());
+  }catch(e){setStatus("重试请求失败:"+e,false);
+    bodyEl(c).innerHTML='<p class="err-msg">重试请求失败:'+esc(""+e)+'</p>'+
+      '<button class="retry-btn" onclick="retryStep('+id+')">↻ 再试一次</button>';}
+}
+
+// 节奏队列:plan_iter 之间留出停留时间,保证每一轮都被画出来+闪动(否则连续到达会被下一轮瞬间覆盖)
+var q=[], pumping=false;
+function enqueue(ev){ q.push(ev); if(!pumping) pump(); }
+function pump(){
+  if(!q.length){ pumping=false; return; }
+  pumping=true;
+  var ev=q.shift();
+  handle(ev);
+  var delay = (ev.type==="plan_iter") ? 900 : 0;   // 每轮迭代至少停留 0.9s
+  setTimeout(pump, delay);
+}
+
+var FINISHED=false;
+async function streamRun(resume){
+  var resp=await fetch("/run",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({topic:TOPIC,detail:DETAIL,llm_key:LLMKEY,search_key:SEARCHKEY,resume:resume})});
+  var reader=resp.body.getReader(), dec=new TextDecoder(), buf="";
+  while(true){var r=await reader.read(); if(r.done)break; buf+=dec.decode(r.value,{stream:true});
+    var idx; while((idx=buf.indexOf("\n\n"))>=0){var chunk=buf.slice(0,idx);buf=buf.slice(idx+2);
+      if(chunk.indexOf("data: ")===0){try{var ev=JSON.parse(chunk.slice(6)); if(ev.type==="done")FINISHED=true; enqueue(ev);}catch(e){}}}}
+}
+async function start(){
+  var topic=document.getElementById("topic").value.trim(); if(!topic)return;
+  document.getElementById("goBtn").disabled=true;
+  TOPIC=topic; DETAIL=document.getElementById("detail").value.trim();
+  LLMKEY=document.getElementById("llmkey").value; SEARCHKEY=document.getElementById("searchkey").value;
+  document.getElementById("cold").classList.add("gone");
+  var app=document.getElementById("app"); app.hidden=false;
+  requestAnimationFrame(function(){app.classList.add("lit")});
+  document.getElementById("topicTitle").textContent=topic;
+  setStatus("连接中…",true);   // 卡片在首个 plan_iter 到达时创建
+  await runLoop(false);
+}
+
+// 断线/手动续跑:带 resume 重连,最多 6 次(服务端跳过已完成步、重试规划或未完成步)
+async function runLoop(resume){
+  FINISHED=false;
+  for(var attempt=0; attempt<6 && !FINISHED; attempt++){
+    try{ await streamRun(resume||attempt>0); }
+    catch(e){
+      if(FINISHED) break;
+      if(attempt<5){ setStatus("连接中断,3s 后自动续跑(第"+(attempt+1)+"次)…",true);
+        await new Promise(function(r){setTimeout(r,3000)}); }
+      else setStatus("连接多次中断:"+e+"(可点「↻ 重试 / 继续」或刷新,已完成步不会丢)",false);
+    }
+  }
+}
+
+document.getElementById("goBtn").onclick=start;
+document.getElementById("resumeBtn").onclick=function(){
+  if(!TOPIC){setStatus("还没开始,先点亮一个主题",false);return;}
+  setStatus("手动续跑中…",true); runLoop(true);
+};
+document.getElementById("topic").addEventListener("keydown",function(e){if(e.key==="Enter")start()});
+document.getElementById("next").onclick=function(){go(i+1)};
+document.getElementById("prev").onclick=function(){go(i-1)};
+document.addEventListener("keydown",function(e){if(document.getElementById("app").hidden)return;
+  if(e.key==="ArrowRight")go(i+1);if(e.key==="ArrowLeft")go(i-1)});
+window.addEventListener("resize",measure);
+track.addEventListener("mousedown",function(e){e.preventDefault();dragging=true;startX=e.clientX;dx=0;track.classList.add("drag");track.classList.remove("snap")});
+window.addEventListener("mousemove",function(e){if(dragging){dx=e.clientX-startX;render(false)}});
+window.addEventListener("mouseup",function(){if(!dragging)return;dragging=false;track.classList.remove("drag");
+  var th=w*0.18;if(dx<-th)go(i+1);else if(dx>th)go(i-1);else{dx=0;render(true)}});
+track.addEventListener("touchstart",function(e){dragging=true;startX=e.touches[0].clientX;dx=0;track.classList.remove("snap")},{passive:true});
+track.addEventListener("touchmove",function(e){if(dragging){dx=e.touches[0].clientX-startX;render(false)}},{passive:true});
+track.addEventListener("touchend",function(){if(!dragging)return;dragging=false;var th=w*0.18;if(dx<-th)go(i+1);else if(dx>th)go(i-1);else{dx=0;render(true)}});
+</script>
+</body></html>

@@ -1,0 +1,19 @@
+# 白名单制:默认忽略一切,只显式放行要公开的文件。
+# 这样能彻底防止误传密钥、逆向分析、方法论笔记、原工具截图等敏感材料。
+/*
+
+# —— 放行:公开的代码与文档 ——
+!.gitignore
+!README.md
+!research_agent.py
+!server.py
+!render_html.py
+!live.html
+!build_gallery.py
+
+# —— 放行:配置占位模板(不含真实 key)——
+!deepseek_api.example.json
+!bocha_api.example.json
+
+# —— 放行:GitHub Pages 画廊(静态报告,已确认无密钥)——
+!docs/

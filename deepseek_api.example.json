@@ -1,0 +1,6 @@
+{
+  "baseUrl": "https://api.deepseek.com",
+  "apiKey": "sk-在这里填你的-DeepSeek-key",
+  "model": "deepseek-v4-pro",
+  "thinkingModel": "deepseek-v4-pro"
+}
