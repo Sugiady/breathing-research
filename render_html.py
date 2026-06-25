@@ -207,6 +207,24 @@ ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px 
 .dot.active{background:var(--green);transform:scale(1.3)}
 .pos{font-size:12px;color:var(--mut);min-width:54px;text-align:center}
 .hint{position:absolute;top:14px;right:20px;font-size:12px;color:var(--mut);background:#fff;border:1px solid var(--line);padding:4px 10px;border-radius:20px}
+/* ---- 手机/平板:两栏改上下堆叠,滑动区给足高度 ---- */
+@media (max-width:820px){
+  .wrap{grid-template-columns:1fr;height:auto;min-height:100vh}
+  .left{max-height:38vh;border-right:none;border-bottom:1px solid var(--line);padding:20px 18px}
+  .left h1{font-size:22px}.left .sub{margin-bottom:16px}
+  .right{height:62vh}
+  .card{padding:22px 18px 44px}
+  .card-head h2{font-size:19px}
+  .concl{font-size:14.5px;padding:12px 14px}
+  .body{font-size:14px}.body table{font-size:12px}
+  .hint{display:none}
+}
+@media (max-width:480px){
+  .left{max-height:34vh}.right{height:66vh}
+  .card{padding:18px 14px 40px}
+  .card-head h2{font-size:18px}
+  .nav button.arrow{width:34px;height:34px;font-size:16px}
+}
 </style></head>
 <body><div class="wrap">
 <aside class="left">
