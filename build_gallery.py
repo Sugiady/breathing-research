@@ -9,9 +9,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DOCS = os.path.join(HERE, "docs")
 RDIR = os.path.join(DOCS, "reports")
 
-# (slug, 主题, 类型标签) —— 当前只放一份精选样例
+# (slug, 主题, 类型标签)
 CURATED = [
-    ("anti-fouling",       "Anti Fouling",         "技术综述"),
+    ("anti-fouling",           "Anti Fouling",       "技术综述"),
+    ("zhejiang-textile",       "浙江省纺织产业集群",  "产业集群"),
+    ("algal-dha",              "藻油DHA",            "产业研究"),
 ]
 
 def teaser(topic):
