@@ -578,49 +578,7 @@ def plan(topic, n_steps=7, llm_key=None):
             prev = ev["plan"]
     return prev, iterations
 
-# ---------------- 阶段2: 执行单步 ----------------
-EXEC_SYS = """你在执行一份行研计划中的某一步,产出高质量研究结论。
-严格遵循该步的 instruction 与 quality_rubric。
-- 若提供了[参考资料]或[检索结果],优先据其作答,不要编造;未提供则基于专业知识审慎作答,对不确定处明确标注。
-- [依赖结论]是前序步骤的结论,可引用衔接,但不要整段复述。
-- 公式与化学式一律用纯文本 Unicode(如 H₂O、OH⁻、O₂↑、→、Δ、≥),禁止使用 LaTeX、$ 符号或 \\command。
-- 数据缺失时,如实写明"公开数据中未找到/以最近可得年份为准"即可——这是高质量的体现;严禁编造数字或用模糊措辞掩盖缺口。每个量化数字都应有检索来源支撑。
-只输出一个 JSON: {"main_conclusion": "一句话核心结论", "detailed": "结构化详细展开(可分点)"}"""
-
-def execute_step(step, done, corpus):
-    print(f"[执行] 步骤{step['id']} {step['name']} ({step['type']})"
-          + ("  [需搜索]" if step.get("need_search") else ""))
-    blocks = [f"步骤名:{step['name']}", f"类型:{step.get('type','')}",
-              f"研究范围(instruction):{step.get('instruction','')}",
-              f"质量标准(rubric):{step.get('quality_rubric','')}"]
-    deps = step.get("depends_on") or []
-    if deps:
-        dep_txt = "\n".join(f"【步骤{i} {done[i]['name']} 结论】{done[i]['main_conclusion']}"
-                            for i in deps if i in done)
-        if dep_txt:
-            blocks.append("[依赖结论]\n" + dep_txt)
-    sources = []
-    if step.get("need_search"):
-        hits, sources = gather_search(step.get("search_queries") or [step["name"]])
-        if hits:
-            blocks.append("[检索结果](仅可据此作答)\n" + hits[:9000]
-                          + "\n\n严格要求:只整理上述检索结果中真实出现的事件,每条尽量标注[日期|来源];"
-                            "不得补充检索结果里没有的事件、数字或主体;无法从结果中确认的,明确写'检索未覆盖'。")
-        else:
-            blocks.append("(未接入搜索,基于你的知识审慎梳理近期进展,并标注'需核实')")
-    elif corpus:
-        blocks.append("[参考资料]\n" + corpus[:8000])
-    content, _, usage = call_llm(
-        [{"role": "system", "content": EXEC_SYS},
-         {"role": "user", "content": "\n\n".join(blocks)}],
-        max_tokens=4000, temperature=0.4)
-    res = extract_json(content)
-    res["name"] = step["name"]; res["type"] = step["type"]; res["id"] = step["id"]
-    res["sources"] = sources
-    print(f"  完成。tokens={usage.get('total_tokens')}")
-    return res
-
-# ---------------- 单步执行(供流式 + 重试复用) ----------------
+# ---------------- 阶段2: 单步执行(流式 / CLI / 重试共用 _exec_one) ----------------
 MIN_SOURCES = 3          # 检索来源少于此 -> 触发换词补搜
 GAP_MAX = 3              # 输出里"查不到"类标记多于此 -> 触发换词补搜
 _GAP_PATS = ["未找到", "检索未覆盖", "公开数据有限", "无法确认", "需核实", "未能查到",
@@ -893,10 +851,16 @@ def _redo_step(topic, step_id, search_key, llm_key, feedback=""):
     prior_res = st["done"].get(sid)
     prior = (prior_res or {}).get("detailed", "")
     try:
-        res, html = _exec_one(step, st["done"], search_key or st.get("search_key"),
-                              llm_key or st.get("llm_key"), st.get("corpus"), topic=topic,
-                              detail=st.get("detail", ""), feedback=feedback, prior=prior,
-                              lang=st.get("lang", "zh"))
+        if step.get("wrapup"):                           # 收口页:重新收拢(读到各步当前最新版)
+            res, html = _exec_wrap(step, list(st["steps"].values()), st["done"], topic,
+                                   detail=st.get("detail", ""), llm_key=llm_key or st.get("llm_key"),
+                                   lang=st.get("lang", "zh"), feedback=feedback, prior=prior,
+                                   research_class=(st["data"].get("research_class") or ""))
+        else:
+            res, html = _exec_one(step, st["done"], search_key or st.get("search_key"),
+                                  llm_key or st.get("llm_key"), st.get("corpus"), topic=topic,
+                                  detail=st.get("detail", ""), feedback=feedback, prior=prior,
+                                  lang=st.get("lang", "zh"))
         if feedback and prior_res:                       # 返工:先把上一版存进 prev,供一键还原
             st.setdefault("prev", {})[sid] = prior_res
         st["done"][sid] = res
@@ -941,13 +905,24 @@ def revert_one(topic, step_id):
 def run(topic, n_steps=7, corpus=None):
     p, iterations = plan(topic, n_steps)
     steps = sorted(p["steps"], key=lambda s: s["id"])
-    done = {}
+    done, budget = {}, {"left": SEARCH_BUDGET}
     for s in steps:                       # id 递增即满足依赖(依赖均指向更小 id)
-        done[s["id"]] = execute_step(s, done, corpus)
+        print(f"[执行] 步骤{s['id']} {s['name']} ({s.get('type','')})"
+              + ("  [需搜索]" if s.get("need_search") else ""))
+        res, _ = _exec_one(s, done, corpus=corpus, topic=topic, budget=budget)
+        done[s["id"]] = res
+        print("  完成。")
+
+    # 收口页:未尽问题与访谈清单(与服务版同一逻辑)
+    wrap = _wrap_step_obj(steps)
+    p["steps"].append(wrap); steps.append(wrap)
+    print(f"[收口] {wrap['name']}")
+    res, _ = _exec_wrap(wrap, steps, done, topic, research_class=p.get("research_class") or "")
+    done[wrap["id"]] = res
 
     plan_path = f"{topic}_plan.json"
     json.dump({"topic": topic, "plan": p, "plan_iterations": iterations,
-               "results": list(done.values())},
+               "results": [done[i] for i in sorted(done)]},
               open(plan_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
     dt = p["deep_thinking"]
@@ -1019,7 +994,7 @@ EXEC_SYS_TEXT = """你在执行一份行研计划中的某一步,产出高质量
 - 【就地全收,不向外联想】当一条检索命中或一段证据里,除了你要找的对象之外还并列着同类的实物数据(如同一篇文章顺带列了多家公司的产能、同一张表含多行同维度数据),把这些一并收入,别只摘匹配查询的那一条——已经摆在眼前的数据不要浪费。严格边界:这只针对"已在你手上的证据里物理存在"的数据;绝不是借此发散去联想或脑补未出现的关联领域(例如由 DHA 联想去补整个鱼油/Omega-3 市场),没在证据里出现的就是没有,不收、不造。
 - 【核实按材料性排序】当要逐条核实一批数字(如一张产能/份额名单)时,把核实精力优先给"错了就会推翻结论"的大额/关键条目;尾部小量级条目可只做轻校验或标"单源待核"。不要平均用力,更不要因为尾部条目好查就把检索预算耗在那里。
 - 【成品口吻,不留工作痕迹】你的输出是给读者的成品报告,不是工作记录或与助手的对话。严禁出现过程性/工具性措辞:如"根据用户提供的网址/链接""本次检索""本次核实""该网页被爬虫限制/抓取失败/需登录""参考资料中未包含"等。来源正常引用即可(标题/机构/日期)。数据确有缺失时,只中性陈述数据本身的缺口(如"公开渠道未见该产能的权威披露"),不要用"本次…未能获取"这种带动作的说法,更不要描述抓取/检索的技术过程。
-- 信息纪律(下列只在"已经有数据"时适用,绝不是凭空造数或强行对标的理由):① 按可信度加权——监管/审计约束(交易所披露、年报、统计公报)> 行业协会(有口径)> 龙头公司 IR > 投融资/并购新闻(真实交易事件)> 付费库 > 咨询 PR/研报"预测数" > 博客/排名站;凡"卖东西"的信源其数字打折看。前沿/新兴技术尤其要重投融资与并购新闻——"谁拿了哪轮、谁被谁收购"是比咨询机构市场规模预览版更硬的玩家与景气信号(但融资金额/估值可能有水分,只取事件本身、估值做参考)。② 关键数字若只有单一来源,标注"(单源,待二次信源核实)";cross-check 是"当确有两条独立来源时,对上则提高置信度",不是"必须给每个数字都配两个来源",更不是"没来源也要硬凑一个对标值"。③ 时效折扣:竞争/客户数据超 5 年、技术数据超 10 年存疑;"预测数"慎用。④ 事实与判断分离:先呈现事实,判断须立足所列事实并说清依据。
+- 信息纪律(下列只在"已经有数据"时适用,绝不是凭空造数或强行对标的理由):① 按可信度加权——监管/审计约束(交易所披露、年报、统计公报)> 行业协会(有口径)> 龙头公司 IR > 投融资/并购新闻(真实交易事件)> 付费库 > 咨询 PR/研报"预测数" > 博客/排名站;凡"卖东西"的信源其数字打折看。前沿/新兴技术尤其要重投融资与并购新闻——"谁拿了哪轮、谁被谁收购"是比咨询机构市场规模预览版更硬的玩家与景气信号(但融资金额/估值可能有水分,只取事件本身、估值做参考)。引用券商研报的具体数字时,先追到研报小字标注的原始出处(协会/统计/公司披露),按那个原始信源定级;研报未注明出处的数与其自身"预测数",只当线索、不进结论。② 关键数字若只有单一来源,标注"(单源,待二次信源核实)";cross-check 是"当确有两条独立来源时,对上则提高置信度",不是"必须给每个数字都配两个来源",更不是"没来源也要硬凑一个对标值"。③ 时效折扣:竞争/客户数据超 5 年、技术数据超 10 年存疑;"预测数"慎用。④ 锚点+换算:权威口径(协会/统计年鉴)未更新到最近年份时,可用龙头公司被审计披露的同比增速在旧口径上推算近似值,并写明"锚点数值+推算路径";锚必须是权威口径,不得拿研报或咨询的预测数当锚。⑤ 事实与判断分离:先呈现事实,判断须立足所列事实并说清依据。
 输出格式(不要 JSON,不要任何前言):第一行以"结论："开头写一句话核心结论;然后空一行,写详细展开(markdown,可分点/表格)。"""
 
 def parse_text_result(text):
@@ -1034,6 +1009,74 @@ def parse_text_result(text):
             break
     detailed = "\n".join(lines[rest_start:]).strip()
     return concl or text[:80], detailed or text
+
+# ---------------- 收口页:未尽问题与访谈清单 ----------------
+# 报告末尾追加一页(不占常规 7-8 步):收拢各步如实标注的信息缺口,按材料性排序;
+# 并把公开检索本质答不了、必须访谈/内部数据才能验证的尽调维度落成清单
+# (源自"公司调研中值得参考的问题":客户/创始人/竞对/前员工交叉印证,财务三表需内部数据)。
+WRAP_NAME = {"zh": "未尽问题与访谈清单", "en": "Open Questions & Interview Plan"}
+WRAP_TYPE = {"zh": "收口", "en": "Wrap-up"}
+
+WRAP_SYS = """你在为一份行研报告写最后的收口页:「未尽问题与访谈清单」。常规研究步骤已完成,下面给你每一步的核心结论与其中如实标注的信息缺口。产出两部分:
+一、还没了解到的问题——把真正影响结论的未决问题按材料性排序(错了就会推翻或明显修正结论的排前面),每条写清:问题本身;为什么重要(动摇哪一步的哪个判断);公开渠道还可尝试的补查路径(指向具体信源体裁,如 环评公示/招股书/年报/公告/协会口径/统计公报/海关数据/投融资新闻)。只列确实悬着的,不把"数据略旧"这类小瑕疵凑数;通常 3-8 条,宁缺毋滥。
+二、访谈与内部数据清单——公开检索本质上答不了的部分,按访谈对象归类,每条写清:对谁、问什么、用来验证哪一步的什么判断。问题要具体到能直接开口问(如"替换现供应商时,导入验证要多久、卡在哪道工序"),不写"了解市场情况"这类空话。
+  对象参考(按主题类型取用,不硬凑):公司/标的类——客户(需求真实性、购买驱动要素、转换成本、验收口径)、创始人/管理层(战略与路线取舍)、竞争对手与前员工(交叉印证)、内部数据(财务三表、运营指标、在手订单);产业/技术/政策类——等价落到 行业专家、协会、龙头企业IR、主管部门、产线实地。
+克制要求:两部分都只从下面材料里真实出现的缺口与该主题公开信息的天然边界出发,不套通用清单;某部分没实质内容就写短,不为对称硬凑。
+输出格式(不要 JSON,不要前言):第一行以"结论:"开头,一句话概括这项研究离"可下判断"还差哪几块;空一行后写详细展开(markdown,两部分各一节)。"""
+
+def _wrap_step_obj(steps, lang="zh"):
+    """构造收口页的合成步骤:id=最大+1,依赖全部常规步骤,不检索。wrapup 标记供重试/续跑分流。"""
+    ids = [s["id"] for s in steps if not s.get("wrapup")]
+    L = "en" if (lang or "zh").lower().startswith("en") else "zh"
+    return {"id": max(ids) + 1, "name": WRAP_NAME[L], "type": WRAP_TYPE[L],
+            "instruction": ("收拢全篇:仍悬而未决、会影响结论的问题按材料性排序;"
+                            "公开检索答不了的维度落成访谈/内部数据清单(对谁、问什么、验证哪个判断)。"),
+            "quality_rubric": "问题具体可执行、直指结论要害为高质量;套通用清单、为对称硬凑条目为低质量。",
+            "depends_on": ids, "need_search": False, "search_queries": [], "wrapup": True}
+
+def _gap_lines(text, cap=10):
+    """从一步的 detailed 里抽出含缺口标记的句子(未找到/单源待核/检索未覆盖…),供收口页收拢。"""
+    out = []
+    extra = ("单源", "未见", "待核", "有限", "尚无")   # EXEC 成品口吻常写"公开渠道未见/待二次信源核实"
+    for ln in re.split(r"[\n。;；]", text or ""):
+        ln = ln.strip().lstrip("-·* ")
+        if any(p in ln for p in _GAP_PATS) or any(p in ln for p in extra):
+            if 6 <= len(ln) <= 160 and ln not in out:
+                out.append(ln)
+        if len(out) >= cap:
+            break
+    return out
+
+def _exec_wrap(step, steps, done, topic, detail="", llm_key=None, lang="zh",
+               feedback="", prior="", research_class=""):
+    """生成收口页,返回 (结果dict, 详细HTML)。不检索、无来源,一次 pro 关思考调用。"""
+    import render_html
+    parts = [f"当前日期:{TODAY}。研究主题:{topic}" +
+             (f"(研究类别:{research_class})" if research_class else "")]
+    if detail and detail.strip():
+        parts.append("[用户补充的研究侧重/背景]\n" + detail.strip())
+    if feedback and feedback.strip():
+        if prior:
+            parts.append("[上一版收口页 —— 你的输出将整页替换它,旧版对的内容要完整重述]\n" + prior[:3000])
+        parts.append("[修订要点 —— 逐条处理,自然融进成品,不要出现'用户反馈'等字样]\n" + feedback.strip())
+    for s in sorted(steps, key=lambda x: x["id"]):
+        if s.get("wrapup"):
+            continue
+        r = done.get(s["id"])
+        if not r:
+            continue
+        seg = f"【步骤{s['id']} {s['name']}】结论:{r.get('main_conclusion', '')}"
+        gaps = _gap_lines(r.get("detailed", ""))
+        if gaps:
+            seg += "\n该步标注的缺口:\n" + "\n".join("- " + g for g in gaps)
+        parts.append(seg)
+    full, _, _ = call_llm([{"role": "system", "content": WRAP_SYS + _lang_directive(lang, "exec")},
+                           {"role": "user", "content": "\n\n".join(parts)}],
+                          max_tokens=4000, temperature=0.4, key=llm_key, model=PRO_MODEL, think=False)
+    concl, detailed = parse_text_result(full)
+    res = {"id": step["id"], "name": step["name"], "type": step.get("type", ""),
+           "main_conclusion": concl, "detailed": detailed, "sources": []}
+    return res, render_html.md_to_html(detailed)
 
 def run_stream(topic, llm_key=None, search_key=None, n_steps=7, corpus=None, resume=False, detail="", deep_verify=False, lang="zh"):
     """生成器:逐事件 yield dict,供 SSE 推给前端。
@@ -1106,6 +1149,8 @@ def run_stream(topic, llm_key=None, search_key=None, n_steps=7, corpus=None, res
         # —— 逐步执行:已完成的(续跑)直接补发;某步失败不中断;每步存盘(断点不丢) ——
         for s in steps:
             sid = s["id"]
+            if s.get("wrapup"):
+                continue                         # 收口页在常规步骤全部完成后单独生成(见下)
             if sid in done:                      # 续跑时已有结果,重发让前端补画
                 r = done[sid]
                 html = render_html.md_to_html(r["detailed"]) + render_html.sources_html(r.get("sources", []))
@@ -1126,6 +1171,38 @@ def run_stream(topic, llm_key=None, search_key=None, n_steps=7, corpus=None, res
                        "detailed_html": html, "sources": res["sources"]}
             except Exception as e:
                 yield {"type": "step_error", "id": sid, "msg": f"{type(e).__name__}: {e}"}
+
+        # —— 收口页:未尽问题与访谈清单(常规步骤全部完成后追加;有失败步则先不收口,等重试) ——
+        wrap = next((s for s in steps if s.get("wrapup")), None)
+        try:
+            if wrap and wrap["id"] in done:      # 续跑/导入:已生成过,补画即可
+                r = done[wrap["id"]]
+                yield {"type": "step_done", "id": wrap["id"], "conclusion": r["main_conclusion"],
+                       "detailed_html": render_html.md_to_html(r.get("detailed", ""))
+                                        + render_html.sources_html(r.get("sources", [])),
+                       "sources": r.get("sources", [])}
+            else:
+                normal_ids = [s["id"] for s in steps if not s.get("wrapup")]
+                if done and all(i in done for i in normal_ids):
+                    st = _RUNS.get(topic) or {}
+                    if wrap is None:
+                        wrap = _wrap_step_obj(steps, st.get("lang", lang))
+                        data["steps"].append(wrap); steps.append(wrap)
+                        st.setdefault("steps", {})[wrap["id"]] = wrap
+                        yield {"type": "step_new",     # 让前端补建这张卡与左目录项
+                               "step": {k: wrap[k] for k in
+                                        ("id", "name", "type", "instruction", "depends_on", "need_search")}}
+                    yield {"type": "step_start", "id": wrap["id"], "name": wrap["name"]}
+                    yield {"type": "step_status", "id": wrap["id"], "msg": "收拢未尽问题与访谈清单…"}
+                    res, html = _exec_wrap(wrap, steps, done, topic, detail=detail,
+                                           llm_key=llm_key or st.get("llm_key"), lang=st.get("lang", lang),
+                                           research_class=data.get("research_class") or "")
+                    done[wrap["id"]] = res
+                    _persist(topic, data, iterations, done)
+                    yield {"type": "step_done", "id": wrap["id"], "conclusion": res["main_conclusion"],
+                           "detailed_html": html, "sources": []}
+        except Exception as e:
+            yield {"type": "step_error", "id": (wrap or {}).get("id", 0), "msg": f"{type(e).__name__}: {e}"}
 
         yield {"type": "saved", "plan": f"{topic}_plan.json"}
         yield {"type": "done"}

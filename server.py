@@ -16,7 +16,7 @@ sys.path.insert(0, HERE)
 import research_agent
 
 PORT = 8770
-BUILD = "2026-07-01-deep"   # 改代码时改这里;GET /ping 可确认连的是不是新代码
+BUILD = "2026-07-05-wrapup"   # 改代码时改这里;GET /ping 可确认连的是不是新代码
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # 静音访问日志

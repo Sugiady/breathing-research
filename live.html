@@ -140,14 +140,14 @@ li.filled .kp-no{background:var(--green)}
       <label><input type="radio" name="lang" value="zh" checked> 中文</label>
       <label><input type="radio" name="lang" value="en"> English</label>
     </div>
-    <label data-i18n="研究主题">研究主题</label>
+    <label for="topic" data-i18n="研究主题">研究主题</label>
     <input id="topic" data-i18n-ph="例如:anti fouling / AEM电解水制氢 / 固态电池硅碳负极" placeholder="例如:anti fouling / AEM电解水制氢 / 固态电池硅碳负极" autofocus>
-    <label data-i18n="补充说明(选填)">补充说明(选填)</label>
+    <label for="detail" data-i18n="补充说明(选填)">补充说明(选填)</label>
     <textarea id="detail" rows="2" data-i18n-ph="界定范围 / 侧重 / 背景。例如:物理、化学、机械方法均可" placeholder="界定范围 / 侧重 / 背景。例如:物理、化学、机械方法均可"></textarea>
     <div class="hintline" data-i18n="会和主题一起进规划与每一步研究,帮它聚焦或放宽边界。">会和主题一起进规划与每一步研究,帮它聚焦或放宽边界。</div>
-    <label data-i18n="LLM API Key(可选)">LLM API Key(可选)</label>
+    <label for="llmkey" data-i18n="LLM API Key(可选)">LLM API Key(可选)</label>
     <input id="llmkey" type="password" data-i18n-ph="留空 → 用本地 deepseek_api.json" placeholder="留空 → 用本地 deepseek_api.json">
-    <label data-i18n="搜索 API Key(可选)">搜索 API Key(可选)</label>
+    <label for="searchkey" data-i18n="搜索 API Key(可选)">搜索 API Key(可选)</label>
     <input id="searchkey" type="password" data-i18n-ph="留空 → 用本地 bocha_api.json(没有则新闻步走模型知识)" placeholder="留空 → 用本地 bocha_api.json(没有则新闻步走模型知识)">
     <label class="deepline"><input type="checkbox" id="deepChk"> <span data-i18n="深度核实(名单/产能类逐个免费追查·慢,~140s/步)">深度核实(名单/产能类逐个免费追查·慢,~140s/步)</span></label>
     <button class="go" id="goBtn" data-i18n="点 亮">点 亮</button>
@@ -297,6 +297,7 @@ function handle(ev){
   if(ev.type==="status"){setStatus(ev.msg,true);}
   else if(ev.type==="plan_iter"){applyPlanIter(ev);}
   else if(ev.type==="meta"){setStatus("规划完成,开始研究…",true);}
+  else if(ev.type==="step_new"){ensureStepCard(ev.step);}   // 收口页等追加步骤:补建卡片+左目录项
   else if(ev.type==="step_start"){var c=cards["s"+ev.id];
     if(c){c.el.classList.add("active");bodyEl(c).innerHTML='<div class="placeholder">研究中…</div>';flash(c.el);go(c.idx);}
     setStatus("步骤 "+ev.id+" 研究中…",true);}
