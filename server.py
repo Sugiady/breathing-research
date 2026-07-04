@@ -16,7 +16,7 @@ sys.path.insert(0, HERE)
 import research_agent
 
 PORT = 8770
-BUILD = "2026-06-25-allpro-funding"   # 改代码时改这里;GET /ping 可确认连的是不是新代码
+BUILD = "2026-07-01-deep"   # 改代码时改这里;GET /ping 可确认连的是不是新代码
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # 静音访问日志
@@ -52,13 +52,36 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _send_json(self, ev):
+        data = json.dumps(ev, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_POST(self):
-        if self.path == "/retry":          # 重试单个步骤,返回单条 JSON(非SSE)
+        if self.path == "/import":          # 上传一份 plan.json 导入,返回 {ok, topic}
             req = self._read_json()
-            ev = research_agent.retry_one(
-                (req.get("topic") or "").strip(), req.get("id"),
-                search_key=(req.get("search_key") or "").strip() or None,
-                llm_key=(req.get("llm_key") or "").strip() or None)
+            try:
+                topic = research_agent.import_plan(req.get("plan"))
+                self._send_json({"ok": True, "topic": topic})
+            except Exception as e:
+                self._send_json({"ok": False, "msg": f"{type(e).__name__}: {e}"})
+            return
+        if self.path in ("/retry", "/refine", "/revert"):   # 重试/反馈返工/还原上一版,返回单条 JSON(非SSE)
+            req = self._read_json()
+            topic = (req.get("topic") or "").strip()
+            sk = (req.get("search_key") or "").strip() or None
+            lk = (req.get("llm_key") or "").strip() or None
+            if self.path == "/refine":
+                ev = research_agent.refine_one(topic, req.get("id"),
+                                               (req.get("feedback") or "").strip(),
+                                               search_key=sk, llm_key=lk)
+            elif self.path == "/revert":
+                ev = research_agent.revert_one(topic, req.get("id"))
+            else:
+                ev = research_agent.retry_one(topic, req.get("id"), search_key=sk, llm_key=lk)
             data = json.dumps(ev, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -73,6 +96,8 @@ class Handler(BaseHTTPRequestHandler):
         llm_key = (req.get("llm_key") or "").strip() or None
         search_key = (req.get("search_key") or "").strip() or None
         resume = bool(req.get("resume"))
+        deep = bool(req.get("deep"))
+        lang = (req.get("lang") or "zh").strip() or "zh"
         if not topic:
             self.send_error(400, "缺少 topic"); return
 
@@ -87,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         try:
-            for ev in research_agent.run_stream(topic, llm_key=llm_key, search_key=search_key, resume=resume, detail=detail):
+            for ev in research_agent.run_stream(topic, llm_key=llm_key, search_key=search_key, resume=resume, detail=detail, deep_verify=deep, lang=lang):
                 push(ev)
         except (BrokenPipeError, ConnectionResetError):
             pass  # 浏览器关了页面

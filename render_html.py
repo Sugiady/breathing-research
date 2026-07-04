@@ -65,7 +65,11 @@ def md_to_html(text):
             tbl = []
             while i < len(lines) and lines[i].lstrip().startswith("|"):
                 tbl.append(lines[i].strip()); i += 1
-            rows = [[c.strip() for c in r.strip("|").split("|")] for r in tbl]
+            def splitrow(r):    # 保护 [...] 内的竖线(模型爱写 [日期 | 来源]),别被当成列分隔
+                r = r.strip().strip("|")
+                r = re.sub(r"\[[^\[\]]*\]", lambda m: m.group(0).replace("|", ""), r)
+                return [c.strip().replace("", "|") for c in r.split("|")]
+            rows = [splitrow(r) for r in tbl]
             rows = [r for r in rows if not all(set(c) <= set("-: ") for c in r)]  # 去分隔行
             if rows:
                 ncol = len(rows[0])
@@ -181,7 +185,7 @@ ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px 
 .tag{font-size:12px;background:#eef5f0;color:var(--green);padding:3px 10px;border-radius:20px;font-weight:600}
 .dep{font-size:12px;color:var(--mut);border:1px solid var(--line);padding:3px 9px;border-radius:20px}
 .concl{background:linear-gradient(0deg,#fbfcfb,#fff);border-left:3px solid var(--green);padding:14px 18px;border-radius:0 10px 10px 0;font-size:15.5px;line-height:1.7;margin-bottom:22px;font-weight:500}
-.body{font-size:14.5px;line-height:1.85;color:#2c3236}
+.body{font-size:14.5px;line-height:1.85;color:#2c3236;cursor:auto}
 .body h3,.body h4,.body h5,.body h6{margin:22px 0 8px;font-size:15.5px}
 .body p{margin:9px 0}
 .body ul{margin:8px 0;padding-left:22px}.body li{margin:4px 0}
@@ -247,7 +251,8 @@ ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px 
 <script>
 (function(){
   var N=__COUNT__, i=0, track=document.getElementById("track");
-  var startX=0, dx=0, dragging=false, w=0;
+  var startX=0, startY=0, dx=0, dragging=false, pending=false, w=0;
+  var DRAG_TH=8;   // 横向移动超过此阈值(且横>纵)才算"拖动翻页",否则放行选词/纵向滚动
   var kps=[].slice.call(document.querySelectorAll("ul.kp li"));
   var dots=[].slice.call(document.querySelectorAll(".dot"));
   function render(anim){
@@ -265,16 +270,25 @@ ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px 
   dots.forEach(function(d){d.onclick=function(){go(+d.getAttribute("data-i"))}});
   kps.forEach(function(li){li.onclick=function(){go(+li.getAttribute("data-go"))}});
   document.addEventListener("keydown",function(e){if(e.key==="ArrowRight")go(i+1);if(e.key==="ArrowLeft")go(i-1)});
-  // 拖拽(鼠标+触摸)
-  function down(x){dragging=true;startX=x;dx=0;track.classList.add("drag")}
-  function move(x){if(!dragging)return;dx=x-startX;render(false)}
-  function up(){if(!dragging)return;dragging=false;track.classList.remove("drag");
+  // 拖拽(鼠标+触摸):意图阈值——横向够大才翻页,否则放行选词/纵向滚动
+  function down(x,y){pending=true;dragging=false;startX=x;startY=y;dx=0;}
+  function move(x,y){
+    if(!pending)return;
+    var ddx=x-startX, ddy=y-startY;
+    if(!dragging){
+      if(Math.abs(ddx)<DRAG_TH || Math.abs(ddx)<=Math.abs(ddy))return;  // 没到阈值/非横向 -> 不拦
+      dragging=true; track.classList.add("drag"); track.classList.remove("snap");
+      try{window.getSelection().removeAllRanges();}catch(e){}            // 进入拖动清掉误选
+    }
+    dx=ddx; render(false);
+  }
+  function up(){pending=false; if(!dragging)return; dragging=false; track.classList.remove("drag");
     var th=w*0.18; if(dx<-th)go(i+1); else if(dx>th)go(i-1); else {dx=0;render(true)} }
-  track.addEventListener("mousedown",function(e){e.preventDefault();down(e.clientX)});
-  window.addEventListener("mousemove",function(e){move(e.clientX)});
+  track.addEventListener("mousedown",function(e){down(e.clientX,e.clientY)});  // 不 preventDefault -> 可选词
+  window.addEventListener("mousemove",function(e){if(dragging)e.preventDefault();move(e.clientX,e.clientY)});
   window.addEventListener("mouseup",up);
-  track.addEventListener("touchstart",function(e){down(e.touches[0].clientX)},{passive:true});
-  track.addEventListener("touchmove",function(e){move(e.touches[0].clientX)},{passive:true});
+  track.addEventListener("touchstart",function(e){down(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
+  track.addEventListener("touchmove",function(e){move(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
   track.addEventListener("touchend",up);
   measure();
 })();

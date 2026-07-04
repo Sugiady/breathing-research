@@ -14,7 +14,13 @@
 配置: deepseek_api.json (baseUrl/apiKey/model)
 搜索: 见 search_bocha(),填入博查 key 即启用;默认关闭,新闻步走模型知识兜底。
 """
-import json, sys, os, time, urllib.request, re, datetime
+import json, sys, os, time, ssl, urllib.request, urllib.parse, http.cookiejar, html as _htmlesc, re, datetime
+
+# 内容抓取用的宽松 SSL 上下文:中国大量内容站证书有毛病(主机名不符/链不全),默认校验会直接抛。
+# 抓正文不是安全敏感场景,等价 curl -k / --ssl-no-revoke,只用于 _fetch_one。
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
 
 TODAY = datetime.date.today().isoformat()
 YEAR = datetime.date.today().year
@@ -55,7 +61,7 @@ def call_llm(messages, max_tokens=4000, temperature=0.4, retries=5, key=None, mo
     last = None
     for attempt in range(retries + 1):
         try:
-            with urllib.request.urlopen(req, timeout=300) as r:
+            with urllib.request.urlopen(req, timeout=180) as r:   # 关思考后基本 20-30s 出,180s 足够;连接卡死也能较快重试
                 d = json.load(r)
             m = d["choices"][0]["message"]
             return m.get("content") or "", m.get("reasoning_content") or "", d.get("usage", {})
@@ -118,11 +124,279 @@ def _bocha_items(query, count=8, key=None):
     print(f"  [warn] 搜索失败(3次): {last}")
     return []
 
-def gather_search(queries, key=None, cap=3):
-    """跑多条查询,返回 (喂给模型的文本, 去重后的来源条目列表)。cap 限制本次最多用几条查询。"""
+# ---------------- 百度补充搜索 ----------------
+# 博查索引偏窄(缺东方财富/每经/雪球/资讯流),百度资讯流补这块,且吃新鲜度、给直链。
+# 关键:百度的验证码是"频控+缺预热cookie"触发,不是IP封死 —— 常驻一个先访首页预热过的
+# cookie jar、复用、撞验证就重新预热重试,即可稳定通过(资讯流尤其稳)。海外IP下网页流偶发
+# 仍被挡,捞不到就算,博查兜底。
+_BD_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+_BD_H = {"User-Agent": _BD_UA,
+         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8", "Accept-Encoding": "identity",
+         "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none"}
+_BD_JAR = http.cookiejar.CookieJar()
+_BD_OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_BD_JAR))
+_BD_PRIMED = [False]
+
+def _bd_get(url, timeout=15):
+    req = urllib.request.Request(url, headers=dict(_BD_H, Referer="https://www.baidu.com/"))
+    with _BD_OPENER.open(req, timeout=timeout) as r:
+        return r.read(700000).decode("utf-8", "ignore")
+
+def _bd_prime():
+    try:
+        _bd_get("https://www.baidu.com/"); _BD_PRIMED[0] = True; time.sleep(0.6)
+    except Exception:
+        pass
+
+def _bd_capt(h):
+    return (not h) or len(h) < 3000 or "百度安全验证" in h or "wappass.baidu.com" in h
+
+def _bd_strip(s):
+    return re.sub(r"\s+", " ", _htmlesc.unescape(re.sub(r"(?s)<[^>]+>", "", s))).strip()
+
+def _bd_parse(h):
+    """抽 (title,url,snippet)。结果块: <h3..><a href=...>标题</a>,摘要在其后的 abstract/content。"""
+    out, seen = [], set()
+    for m in re.finditer(r'<h3[^>]*>\s*<a[^>]*?href="(?P<u>[^"]+)"[^>]*>(?P<t>.*?)</a>', h, re.S):
+        url = _htmlesc.unescape(m.group("u")); title = _bd_strip(m.group("t"))
+        if not title or url in seen:
+            continue
+        seen.add(url)
+        tail = h[m.end():m.end() + 2600]
+        sn = (re.search(r'class="[^"]*(?:content-right|c-abstract|content)[^"]*"[^>]*>(.*?)</(?:span|div|p)>', tail, re.S)
+              or re.search(r'<span[^>]*class="[^"]*"[^>]*>(.{40,}?)</span>', tail, re.S))
+        out.append((title, url, _bd_strip(sn.group(1))[:180] if sn else ""))
+    return out
+
+def _baidu_items(query, count=6, news=True, retries=2):
+    """百度搜一条 query,返回与博查同形状的条目。news=True 走资讯流(更稳/更新/多直链)。
+    任何异常都吞掉返回 [],绝不影响主流程(博查兜底)。"""
+    try:
+        if not _BD_PRIMED[0]:
+            _bd_prime()
+        wd = urllib.parse.quote(query)
+        url = ("https://www.baidu.com/s?rtt=1&tn=news&word=" + wd) if news else ("https://www.baidu.com/s?wd=" + wd)
+        for attempt in range(retries + 1):
+            try:
+                h = _bd_get(url)
+            except Exception:
+                time.sleep(1.2 * (attempt + 1)); continue
+            if _bd_capt(h):
+                _BD_PRIMED[0] = False; _bd_prime(); time.sleep(1.0); continue
+            return [{"name": t, "url": u, "date": "",
+                     "site": re.sub(r"^https?://(www\.)?", "", u).split("/")[0], "summary": s}
+                    for t, u, s in _bd_parse(h)[:count]]
+    except Exception as e:
+        print(f"  [warn] 百度补充搜索异常: {type(e).__name__}")
+    return []
+
+_URL_RE = re.compile(r"https?://[^\s)\]）】,，、；;\"']+")
+def _fetch_one(u, per=2500, timeout=12):
+    """抓单个 URL 正文并剥成纯文本,返回 (title, body, item)。抓取失败抛异常由调用方处理。"""
+    req = urllib.request.Request(u, headers={
+        "User-Agent": _BD_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8", "Accept-Encoding": "identity"})
+    with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
+        raw = r.read(200000).decode("utf-8", "ignore")
+    title = (re.search(r"<title[^>]*>(.*?)</title>", raw, re.S | re.I) or [None, ""])[1].strip()[:120]
+    body = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", raw)
+    body = re.sub(r"(?s)<[^>]+>", " ", body)
+    body = re.sub(r"&[a-z#0-9]+;", " ", body)
+    body = re.sub(r"\s+", " ", body).strip()[:per]
+    item = {"name": title or u, "url": u, "date": "",
+            "site": re.sub(r"^https?://(www\.)?", "", u).split("/")[0], "summary": ""}
+    return title, body, item
+
+def _fetch_urls(text, limit=3):
+    """从文本里提取 URL 并直接抓取正文(博查只能搜不能抓,用户给的链接得真去读)。
+    返回 (喂模型的证据文本, 来源条目列表)。每个 URL 失败不影响其余;失败的直接跳过,不在证据里留失败note
+    (免得模型把"抓取失败/网页被限制"写进成品正文)。"""
+    urls, seen = [], set()
+    for u in _URL_RE.findall(text or ""):
+        u = u.rstrip(".,。")
+        if u not in seen:
+            seen.add(u); urls.append(u)
+    urls = urls[:limit]
+    if not urls:
+        return "", []
+    blocks, items = [], []
+    for u in urls:
+        try:
+            title, body, item = _fetch_one(u, per=2500, timeout=15)
+            blocks.append(f"# 资料来源 {u}\n标题:{title}\n正文摘录:{body}")
+            items.append(item)
+        except Exception:
+            continue   # 读不到就跳过,不在证据里留失败note——避免模型把"抓取失败/网页被限制"写进正文
+    return "\n\n".join(blocks), items
+
+def _fetch_url_list(urls, limit=3, per=2600, timeout=12):
+    """执行层用:抓命中页正文(产能/份额这类表格明细常只住在全文里,snippet 取不到)。
+    与 _fetch_urls 的区别——这是自动增强抓取,失败/空壳(JS渲染/验证页)一律静默跳过,
+    不把失败note塞进证据,免得喧宾夺主。返回喂模型的证据文本。"""
+    blocks, seen = [], set()
+    for u in (urls or []):
+        if len(blocks) >= limit:
+            break
+        u = (u or "").rstrip(".,。")
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        try:
+            title, body, _ = _fetch_one(u, per=per, timeout=timeout)
+        except Exception:
+            continue
+        if len(body) < 200:        # 空壳/JS渲染/验证页:无有效正文,跳过
+            continue
+        blocks.append(f"# 资料来源 {u}\n标题:{title}\n正文摘录:{body}")
+    return "\n\n".join(blocks)
+
+# ---------------- 深度核实:可信度分流 + 线索抽实体 + 并行免费追搜 ----------------
+# 泛化自 Suj 的人类检索快照:一条命中有两种角色——
+#   定位型(可信源:财经披露/公告/年报/IR/政府)→ 数直接在里面,采信;
+#   线索型(次可信:媒体排名表/整理稿/文库/自媒体)→ 不信其数,只抽候选实体名,拿去逐个再查。
+# 追搜走"免费"通道(百度资讯 + fetch,不花钱、不占博查预算),所以按主体逐个查、best-effort。
+_ANCHOR_DOMAINS = ("sina.com.cn", "eastmoney.com", "10jqka.com.cn", "cninfo.com.cn",
+                   "sse.com.cn", "szse.cn", "stcn.com", "cs.com.cn", "nbd.com.cn",
+                   "yicai.com", "cnstock.com", "gov.cn")     # 财经披露/权威财媒/政府
+_LEAD_DOMAINS = ("baijiahao.baidu.com", "toutiao.com", "sohu.com", "zhihu.com",
+                 "163.com", "docin.com", "doc88.com", "1688.com", "hbzhan.com",
+                 "lsjxww.com", "paihang", "paiming", "rank")  # 自媒体/文库/B2B/排名站
+
+def _source_tier(url):
+    """定位型 anchor(可信、采数) / 线索型 lead(次可信、只抽实体)。未知域名保守按 lead。"""
+    u = (url or "").lower()
+    if any(d in u for d in _ANCHOR_DOMAINS):
+        return "anchor"
+    return "lead"
+
+def _bd_cookie_header():
+    """预热(一次)后导出 BAIDUID 等 cookie 字符串,供并行线程共享——暖 cookie 才不吃验证码。"""
+    if not _BD_PRIMED[0]:
+        _bd_prime()
+    return "; ".join(f"{c.name}={c.value}" for c in _BD_JAR)
+
+def _baidu_query_isolated(query, cookie="", count=6):
+    """单条百度资讯查询,线程安全:自建 jar opener。先用共享暖 cookie;撞验证就自己冷预热重试。"""
+    jar = http.cookiejar.CookieJar()
+    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    def g(url, ck=""):
+        h = dict(_BD_H, Referer="https://www.baidu.com/")
+        if ck:
+            h["Cookie"] = ck
+        with op.open(urllib.request.Request(url, headers=h), timeout=15) as r:
+            return r.read(700000).decode("utf-8", "ignore")
+    url = "https://www.baidu.com/s?rtt=1&tn=news&word=" + urllib.parse.quote(query)
+    use_shared = bool(cookie)
+    for attempt in range(3):
+        try:
+            h = g(url, cookie if use_shared else "")     # use_shared 关闭后靠 jar 自带 cookie
+        except Exception:
+            time.sleep(0.6); continue
+        if _bd_capt(h):
+            try:
+                g("https://www.baidu.com/"); time.sleep(0.6)   # 自己冷预热到本线程 jar
+            except Exception:
+                pass
+            use_shared = False
+            continue
+        return [{"name": t, "url": u, "date": "",
+                 "site": re.sub(r"^https?://(www\.)?", "", u).split("/")[0], "summary": s}
+                for t, u, s in _bd_parse(h)[:count]]
+    return []
+
+def _baidu_parallel(queries, max_workers=2):
+    """并行跑多条百度查询(免费),返回 [(query, items)]。共享暖 cookie;best-effort,失败给空。"""
+    from concurrent.futures import ThreadPoolExecutor
+    queries = [q for q in queries if q and q.strip()]
+    if not queries:
+        return []
+    cookie = _bd_cookie_header()          # 预热一次,所有线程共享,避免各自冷启动撞验证
+    out = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = [(q, ex.submit(_baidu_query_isolated, q, cookie)) for q in queries]
+        for q, f in futs:
+            try:
+                out.append((q, f.result(timeout=45)))
+            except Exception:
+                out.append((q, []))
+    return out
+
+_ENT_KW = ("名单", "企业", "公司", "厂商", "玩家", "格局", "产能", "份额", "排名",
+           "主要", "供应商", "竞争", "标的", "参与者")
+def _wants_entity_verify(step):
+    """该步是否是'逐个实体核实'型(名单/产能/份额/竞争格局)。只对这类才启深度核实,省时。"""
+    blob = (step.get("name", "") + step.get("type", "") + step.get("instruction", ""))
+    return sum(1 for k in _ENT_KW if k in blob) >= 1
+
+def _extract_entities(corpus_text, topic, step, llm_key=None):
+    """从种子命中(标题+摘要)里抽候选'企业'名 + 一个简短追查焦点词(用便宜的 flash)。
+    返回 {'entities':[...], 'focus':'...'}。绝不臆造未出现的实体。"""
+    sysp = ("你在给一次事实核实做准备。下面是若干检索命中的标题与摘要。"
+            "任务:(1)抽出其中真正作为核实对象的**企业/公司**名(实际从事该产品生产或销售的商业主体)——"
+            "只列明确出现、与主题相关的,去重,最多8个;"
+            "**务必排除**:大学/科研院所/'国家科技成果网'这类机构、期刊、'河北XX厂家'这种黄页分类词、纯产品名;"
+            "以及主业与本主题产品无关的公司(如饲料/养殖/综合化工企业,除非它明确就是该产品的生产商)。"
+            "(2)给一个**简短**(不超过2个词)的追查焦点词,拼在公司名后能直接搜到数据的那种,如'DHA 产能'、'市占率'、'融资'。"
+            "严禁臆造未出现的企业。只输出JSON:{\"entities\":[\"...\"],\"focus\":\"...\"}")
+    user = f"主题:{topic}\n核实目标:{step.get('instruction','')}\n\n[检索命中]\n{corpus_text[:3500]}"
+    try:
+        content, _, _ = call_llm([{"role": "system", "content": sysp}, {"role": "user", "content": user}],
+                                 max_tokens=500, temperature=0.3, key=llm_key, model=FAST_MODEL, think=False)
+        m = re.search(r"\{.*\}", content, re.S)
+        if m:
+            obj = json.loads(m.group(0))
+            ents = [e.strip() for e in obj.get("entities", []) if isinstance(e, str) and e.strip()]
+            focus = " ".join((obj.get("focus") or "").split()[:2])   # 焦点词砍到≤2词,避免查询过长
+            return {"entities": ents[:8], "focus": focus}
+    except Exception:
+        pass
+    return {"entities": [], "focus": ""}
+
+def deep_verify(sources, topic, step, llm_key=None, notify=None):
+    """种子命中 → 分流 → 线索页抽实体 → 并行免费百度逐实体追搜 → 定位型再抓全文。
+    返回 (追加证据文本, 追加sources)。全程免费(不占博查预算)。"""
+    # 抽实体用全部种子命中(公司名常在 anchor 里,别挑食);信任分流只用于'信谁的数'。
+    # 公司名多在标题里 -> 所有标题先行(短、都放得下)、anchor 优先,摘要垫后,避免被截断漏名。
+    ordered = sorted(sources, key=lambda s: 0 if _source_tier(s["url"]) == "anchor" else 1)
+    titles = "\n".join("· " + s["name"] for s in ordered)
+    summ = "\n".join(f"{s['name']}:{(s.get('summary','') or '')[:120]}" for s in ordered[:10])
+    corpus = "[全部命中标题]\n" + titles + "\n\n[部分摘要]\n" + summ
+    if not corpus.strip():
+        return "", []
+    ext = _extract_entities(corpus, topic, step, llm_key)
+    ents, focus = ext["entities"], ext["focus"]
+    if not ents:
+        return "", []
+    if notify:
+        notify(f"从线索页抽出 {len(ents)} 个待核实体,免费并行追查…")
+    qmap = _baidu_parallel([f"{e} {focus}".strip() for e in ents])
+    add_sources, seen, blocks = [], {s["url"] for s in sources}, []
+    for q, items in qmap:
+        for it in items:
+            if it["url"] and it["url"] not in seen:
+                seen.add(it["url"]); add_sources.append(it)
+        if items:
+            blocks.append(f"# 关于「{q}」的补充资料\n" +
+                          "\n".join(f"- [{x['site']}] {x['name']}:{x['summary']}" for x in items[:4]))
+    anchor_urls = [s["url"] for s in add_sources if _source_tier(s["url"]) == "anchor"]
+    anchor_ev = _fetch_url_list(anchor_urls, limit=6)     # 追查命中里的定位型再抓全文(免费)
+    ev = "\n\n".join(x for x in ["\n".join(blocks), anchor_ev] if x.strip())
+    return ev, add_sources
+
+def gather_search(queries, key=None, cap=3, baidu=True):
+    """跑多条查询,返回 (喂给模型的文本, 去重后的来源条目列表)。cap 限制本次最多用几条查询。
+    博查起手第一发;baidu=True 时再用百度资讯流补一发,合并去重(补博查缺的财经/资讯/投融资)。"""
     hits, items, seen = None, [], set()
     for q in (queries or [])[:cap]:
         its = _bocha_items(q, key=key)
+        if baidu:                              # 百度资讯流补充:博查没有的直链条目并进来
+            burls = {x["url"] for x in its}
+            for bx in _baidu_items(q):
+                if bx["url"] and bx["url"] not in burls:
+                    its.append(bx); burls.add(bx["url"])
         if not its:
             continue
         block = "\n".join(f"- [{x['date']} | {x['site']}] {x['name']}\n  {x['summary']}\n  来源: {x['url']}"
@@ -136,6 +410,8 @@ def gather_search(queries, key=None, cap=3):
 # ---------------- 预检索:规划前先摸一眼"有哪些信息" ----------------
 SEARCH_BUDGET = 9        # 一次研究总检索预算(预检索 + 执行)
 PRE_SEARCH_N = 2         # 预检索至少几条
+FETCH_TOP_N = 3          # 每个数据步:对命中页前几条 URL 抓全文(snippet 取不到表格/明细)
+DEEP_VERIFY = False      # 逐实体深度核实(种子→抽实体→并行免费追搜)。惊艳但慢(~140s/步,受API延迟支配)且不稳,默认关;想深挖时开
 
 def _landscape_queries(topic, detail="", llm_key=None):
     """生成 2-3 条宽口径检索词,用于规划前的情报预览。失败则回退到启发式。"""
@@ -192,13 +468,28 @@ ITER_SYS = {
 4: """你是行研规划器的第4轮:质量判据与检索准备。在[上一轮规划]基础上,为每个步骤补充:
 - quality_rubric(优秀输出应做到什么、一般输出常见的不足)。务必写明:如实标注数据边界(如"公开数据有限""以最近可得年份为准")属于高质量;含糊掩盖或编造数字属于低质量;能区分事实/推断/观点、关键数字有可靠来源、判断立足所列事实,属于高质量。尤其点明:只写有据的、略过没覆盖的(不为完整搭空框架),矩阵/对比中缺数据的格子留空或定性、不强凑数字——这属于高质量(诚实);反之堆砌无来源的精确数字、或为求对称而填满杜撰的表格,属于低质量。
 - need_search(布尔)。以下两类都应为 true:① 近期新闻/进展/事件类步骤;② 任何依赖具体、时效性数字的步骤(市场规模、产量、产能、销量、份额、价格、增速、企业数量等)。纯概念/原理/框架类步骤为 false。
-- search_queries(若 need_search 为 true,给出中英文检索查询词数组)。检索词遵循"按问题倒推信源类型":优先指向强约束信源(监管/交易所披露、年报季报、统计公报与年鉴、行业协会、龙头公司 IR),而不是泛搜"xx market size";数据型步骤点名 具体指标+地区+最近年份(如"浙江 纺织 产业集群 产值 2024");新闻型含关键主体/产品/事件类型;前沿/新兴技术或竞争格局类步骤,优先检索投融资与并购新闻(融资轮次、领投方、估值、公司介绍)——这是比咨询市场报告更硬的玩家与景气信号;允许给代理指标/邻近口径的备用词,不要钻牛角尖于单一数字。否则空数组。
+- search_queries(若 need_search 为 true,给出中英文检索查询词数组)。检索词遵循"按问题倒推信源类型":优先指向强约束信源(监管/交易所披露、年报季报、统计公报与年鉴、行业协会、龙头公司 IR),而不是泛搜"xx market size";数据型步骤点名 具体指标+地区+最近年份(如"浙江 纺织 产业集群 产值 2024");新闻型含关键主体/产品/事件类型;
+  并按"事实种类→装它的文档体裁"配后缀,直接钓一手原始件而非泛搜:要产能/在建/工艺路线→加"环评"(环评报告含产能明细);要募投/历史产能/财务→加"招股书""年报";要扩产/重大事项→加"公告";要份额/客户→加"调研纪要""投资者关系"。只在该步要的正是这种数时才加,不要给每条查询都套体裁后缀;前沿/新兴技术或竞争格局类步骤,优先检索投融资与并购新闻(融资轮次、领投方、估值、公司介绍)——这是比咨询市场报告更硬的玩家与景气信号;允许给代理指标/邻近口径的备用词,不要钻牛角尖于单一数字。否则空数组。
   检索预算有限:整个研究执行阶段总检索约 5-7 次(规划前已另做 2 次预检索)。请把检索集中到真正依赖外部数据的步骤,每个需检索步给 1-2 条最高命中率的查询;概念/原理/框架类步骤一律空数组。结合上面的[检索情报预览]判断哪些数据查得到——对预览里明显查不到的,别硬设检索。
 - deep(布尔)。该步若以"原创推理/第一性推演/多因素权衡/比较研判/致命风险与前瞻综合判断"为主、需要深度思考才能写好,标 true;若主要是梳理检索结果、罗列归纳、整理时间线/名单/事件等信息整合类工作,标 false。务必克制:多数步骤应为 false,通常只有第一性/本质分析、关键技术或路线对比研判、致命风险与前瞻这类真正吃推理的步骤才标 true(一般不超过 2-3 个)。
 保持前几轮已定字段不变。只输出完整 JSON(steps 每项含 id,name,type,instruction,depends_on,quality_rubric,need_search,search_queries,deep)。""",
 }
 
-def _iter_messages(k, topic, prev, detail="", probe=""):
+def _lang_directive(lang, mode="exec"):
+    """内容语言指令,压在系统提示末尾(模型更听结尾)。mode: iter=JSON值用英文 / exec=整篇英文并覆盖'结论：'格式。
+    检索词与专有名词保持能命中源站的形态。lang 非 en -> 返回空(默认中文,零改动)。"""
+    if not (lang or "zh").lower().startswith("en"):
+        return ""
+    if mode == "iter":
+        return ("\n\n[OUTPUT LANGUAGE — HIGHEST PRIORITY] Write every JSON string VALUE (research_class, all deep_thinking text, "
+                "and each step's name/type/instruction/quality_rubric) in fluent, professional English. Keep JSON keys unchanged. "
+                "EXCEPTION: keep `search_queries` in the language that best matches the sources (Chinese for a China-focused topic), "
+                "and keep company/product proper nouns in their searchable original form.")
+    return ("\n\n[OUTPUT LANGUAGE — HIGHEST PRIORITY, overrides any Chinese formatting instruction above] "
+            "Write the ENTIRE answer in fluent, professional English. The first line MUST start with 'Conclusion:' (NOT '结论：'), "
+            "then a blank line, then the detailed body in English Markdown. Keep cited source names and URLs as they appear.")
+
+def _iter_messages(k, topic, prev, detail="", probe="", lang="zh"):
     datehint = (f"\n\n(当前日期 {TODAY}。涉及数据、竞争格局、玩家名单等时效内容时,"
                 f"检索词与判断须覆盖 {YEAR} 年及最近 1-2 年的最新进展,不要停留在更早的年份。)")
     detailhint = (f"\n\n[用户补充的研究侧重/背景](请在规划时充分尊重并据此取舍范围与深度):\n{detail.strip()}"
@@ -212,7 +503,8 @@ def _iter_messages(k, topic, prev, detail="", probe=""):
     else:
         user = (f"研究主题:{topic}{datehint}{detailhint}{probehint}\n\n[上一轮规划](在此基础上精化,不要推翻已定的步骤):\n"
                 + json.dumps(prev, ensure_ascii=False))
-    return [{"role": "system", "content": ITER_SYS[k]}, {"role": "user", "content": user}]
+    return [{"role": "system", "content": ITER_SYS[k] + _lang_directive(lang, "iter")},
+            {"role": "user", "content": user}]
 
 def _merge_steps(prev_steps, cur_steps):
     """步骤集合锁定在 Iter1:后续轮次只能给已有步骤补字段,不能增删步骤。
@@ -231,13 +523,13 @@ def _merge_steps(prev_steps, cur_steps):
         merged.append(m)
     return merged
 
-def plan_iters(topic, llm_key=None, stream_iter1=True, detail="", probe=""):
+def plan_iters(topic, llm_key=None, stream_iter1=True, detail="", probe="", lang="zh"):
     """生成器:逐轮规划。Iter1 可流式吐 reasoning(供"呼吸"),Iter2~4 直接返回。
     yield {type:thinking_delta|plan_iter|plan_final}。
     复杂主题(步骤多/字段长)整页 JSON 可能超 max_tokens 被截断 -> 自动升档重试。"""
     prev, dt = None, {}
     for k in (1, 2, 3, 4):
-        msgs = _iter_messages(k, topic, prev, detail, probe)
+        msgs = _iter_messages(k, topic, prev, detail, probe, lang)
         cur = None
         for mt in (12000, 18000):          # token 升档:截断了就给更大上限再来一次
             if k == 1 and stream_iter1 and mt == 12000:
@@ -377,16 +669,37 @@ def _alt_queries(topic, step, prior, llm_key=None):
         pass
     return []
 
-def _search_block(hits):
-    return ("[检索结果](仅可据此作答)\n" + hits[:9000]
-            + "\n\n严格要求:只整理上述检索结果中真实出现的事件,每条尽量标注[日期|来源];"
-              "不得补充检索结果里没有的事件、数字或主体;无法确认的写'检索未覆盖'。")
+def _feedback_queries(topic, step, feedback, llm_key=None):
+    """据用户对该步的反馈,提取最该补搜的 1-3 条检索词(围绕用户点名的公司/链接/遗漏点)。"""
+    sysp = ("用户对某研究步骤的产出提了反馈,指出遗漏、或点名了该补查的公司/链接/主体。"
+            "据此生成 1-3 条最针对性的中英文检索词:若反馈含公司名/产品/链接,围绕它;若指出某遗漏维度,直指该维度。"
+            "只输出 JSON 字符串数组,不要解释。")
+    user = (f"主题:{topic}\n步骤:{step.get('name')} — {step.get('instruction','')}\n"
+            f"用户反馈:{feedback.strip()}")
+    qs = []
+    try:
+        content, _, _ = call_llm([{"role": "system", "content": sysp}, {"role": "user", "content": user}],
+                                 max_tokens=500, temperature=0.4, key=llm_key, model=FAST_MODEL, think=False)
+        m = re.search(r"\[.*\]", content, re.S)
+        if m:
+            qs = [q for q in json.loads(m.group(0)) if isinstance(q, str) and q.strip()][:3]
+    except Exception:
+        pass
+    return qs
 
-def _exec_one(step, done, search_key=None, llm_key=None, corpus=None, topic="", notify=None, detail="", budget=None):
+def _search_block(hits):
+    return ("[参考资料](仅可据此作答)\n" + hits[:9000]
+            + "\n\n严格要求:只整理上述资料中真实出现的事件,每条尽量标注[日期|来源];"
+              "不得补充资料里没有的事件、数字或主体;无法确认的写'公开渠道未见'。"
+              "注意成品口吻:不要写'本次检索''根据检索结果'这类过程词,直接陈述结论与依据。")
+
+def _exec_one(step, done, search_key=None, llm_key=None, corpus=None, topic="", notify=None,
+              detail="", budget=None, feedback="", prior="", deep=None, lang="zh"):
     """执行一个步骤,返回 (结果dict, 详细HTML)。
     安全重搜:检索覆盖不足(来源少/缺口多)时,代码侧换检索词再搜一轮、补充真实证据后重写——
     全程不奖励"减少缺口",只给更多真实证据;判定与重试都在代码侧,不问模型缺口多不多。
-    budget={'left':N} 时受全局检索预算约束(预算用尽则该步走知识兜底);None=不限(单步重试用)。"""
+    budget={'left':N} 时受全局检索预算约束(预算用尽则该步走知识兜底);None=不限(单步重试/反馈返工用)。
+    feedback 非空 = 带用户反馈返工:把上一版产出 prior + 用户批评喂进去,并据反馈定向补搜。"""
     import render_html
     base = [f"当前日期:{TODAY}。涉及最新进展/竞争格局/数据时,以最近可得信息为准,优先 {YEAR} 年及近一年,不要停留在更早年份。",
             f"步骤名:{step['name']}", f"类型:{step.get('type','')}",
@@ -399,8 +712,27 @@ def _exec_one(step, done, search_key=None, llm_key=None, corpus=None, topic="", 
     if dep_txt:
         base.append("[依赖结论]\n" + dep_txt)
 
+    fb_queries, url_sources, prior_sources = [], [], []
+    if feedback and feedback.strip():
+        base.append("[上一版产出 —— 仅供参考,你要交付的是它的完整替换版](下面是这一页的旧版本。"
+                    "你的输出会整页替换掉它,读者只看得到你的新版本、看不到这份旧的。"
+                    "因此务必把这一页写成完整、自包含的版本:旧版里对的内容要原样保留并完整重述,"
+                    "针对反馈修订该改的地方;严禁以'前面已讲过/上一版提过/此处省略'为由略写任何内容——"
+                    "凡省略,读者就彻底看不到了。)\n"
+                    + (prior or "(无)")[:3000])
+        base.append("[修订要点 —— 必须逐条处理,但产出是成品报告、不是给用户的回信](下面是需要修订/补充的点;"
+                    "指到链接或公司就围绕它补检索与核实,无法证实的如实处理、绝不编造。"
+                    "关键:把该补的内容自然融进报告正文,**不要出现'用户反馈''用户要求''您提到的链接'这类字样,也不要专门开一节回应这些要点或说明某链接无法核实**;"
+                    "补不到的那条,就当它在公开渠道没有相应披露来中性处理或略过,不要交代它来自反馈或链接读取失败)\n"
+                    + feedback.strip())
+        url_ev, url_sources = _fetch_urls(feedback)      # 用户在反馈里贴的链接:直接抓正文(博查只能搜不能抓)
+        if url_ev:
+            base.append("[补充资料正文 —— 据此作答与核实,并登记为来源;正文里正常引用即可,不要提'用户提供的链接'之类字样]\n" + url_ev[:6000])
+        prior_sources = (done.get(step["id"]) or {}).get("sources", [])
+        fb_queries = _feedback_queries(topic or step["name"], step, feedback, llm_key)
+
     def write(extra):   # 统一 pro + 关思考(关思考后与 flash 用时无差、质量更好)
-        full, _, _ = call_llm([{"role": "system", "content": EXEC_SYS_TEXT},
+        full, _, _ = call_llm([{"role": "system", "content": EXEC_SYS_TEXT + _lang_directive(lang, "exec")},
                                {"role": "user", "content": "\n\n".join(base + extra)}],
                               max_tokens=4000, temperature=0.4, key=llm_key, model=PRO_MODEL, think=False)
         return full
@@ -413,38 +745,80 @@ def _exec_one(step, done, search_key=None, llm_key=None, corpus=None, topic="", 
         return avail
 
     sources = []
-    if step.get("need_search"):
-        queries = step.get("search_queries") or [step["name"]]
-        ncap = take(min(2, len(queries)))          # 每步最多 2 条,且受预算约束
+    if step.get("need_search") or fb_queries:
+        # 反馈驱动的检索词优先;再接原步骤检索词。反馈返工(budget=None)允许多搜一点
+        queries = [q for q in (list(fb_queries) +
+                   (step.get("search_queries") or ([step["name"]] if step.get("need_search") else []))) if q]
+        ncap = take(min(3 if fb_queries else 2, len(queries))) if queries else 0
+        full_ev, did_deep = "", False
         if ncap > 0:
             hits, sources = gather_search(queries, key=search_key, cap=ncap)
+            if sources:                          # 读命中页全文:表格/产能/份额明细常只住在正文里
+                if notify:
+                    notify("抓取命中页原文…")
+                full_ev = _fetch_url_list([s["url"] for s in sources], limit=FETCH_TOP_N)
+                _deep = DEEP_VERIFY if deep is None else deep
+                if _deep and _wants_entity_verify(step):   # 名单/产能/份额类:逐实体免费深度核实(非阻塞,默认关)
+                    try:
+                        dv_ev, dv_src = deep_verify(sources, topic or step["name"], step, llm_key, notify)
+                        seen = {s["url"] for s in sources}
+                        for s in dv_src:
+                            if s["url"] and s["url"] not in seen:
+                                seen.add(s["url"]); sources.append(s)
+                        if dv_ev:
+                            full_ev = (full_ev + "\n\n" + dv_ev) if full_ev else dv_ev
+                        did_deep = True          # 已做深度核实,后面跳过冗余的老"补搜一轮"
+                    except Exception as e:
+                        if notify:
+                            notify(f"深度核实跳过({type(e).__name__})")
         else:
             hits = None
             if notify:
                 notify("检索预算已用尽,本步基于已有知识审慎作答")
-        full = write([_search_block(hits)] if hits else
+        ev = []
+        if hits:
+            ev.append(_search_block(hits))
+        if full_ev:
+            ev.append("[来源正文摘录 —— 摘要取不到的表格/明细住在这里,优先据此核实;"
+                      "只采用其中真实出现的数据,无关内容忽略]\n" + full_ev[:7000])
+        full = write(ev if ev else
                      ["(本步未做新检索,基于知识审慎梳理近期进展,并标注'需核实')"])
-        # —— 安全重搜:只在覆盖不足且仍有预算时,换检索词补一轮真实证据再重写 ——
-        if hits and (len(sources) < MIN_SOURCES or _gap_count(full) >= GAP_MAX) and take(1) > 0:
+        # —— 安全重搜:仅普通执行(非反馈返工)、覆盖不足且仍有预算时补一轮;反馈返工已带定向检索,不再自动补 ——
+        if not fb_queries and not did_deep and hits and (len(sources) < MIN_SOURCES or _gap_count(full) >= GAP_MAX) and take(1) > 0:
             if notify:
                 notify("覆盖不足,换检索词补搜一轮…")
             alt = _alt_queries(topic or step["name"], step, queries, llm_key)
             if alt:
                 hits2, src2 = gather_search(alt, key=search_key, cap=1)
                 seen = {s["url"] for s in sources}
+                new_urls = []
                 for s in src2:
                     if s["url"] and s["url"] not in seen:
-                        seen.add(s["url"]); sources.append(s)
+                        seen.add(s["url"]); sources.append(s); new_urls.append(s["url"])
+                ev2 = _fetch_url_list(new_urls, limit=FETCH_TOP_N)   # 补搜命中页也抓全文
                 merged = ((hits or "") + "\n" + (hits2 or "")).strip()
                 if merged:
-                    full = write([_search_block(merged)])   # 用增补后的证据重写,结论由模型据实给
+                    blocks = [_search_block(merged)]
+                    all_ev = "\n\n".join(x for x in (full_ev, ev2) if x)
+                    if all_ev:
+                        blocks.append("[命中页原文抓取 —— 优先据此核实,只采用真实出现的数据]\n" + all_ev[:7000])
+                    full = write(blocks)   # 用增补后的证据重写,结论由模型据实给
     elif corpus:
         full = write(["[参考资料]\n" + corpus[:8000]])
     else:
         full = write([])
 
     concl, detailed = parse_text_result(full)
-    sources = _cited_sources(sources, full)          # 只留正文真正引用到的来源
+    if feedback and feedback.strip():
+        # 反馈返工:来源累加(用户给的链接 + 本轮检索 + 上一版),去重;不做"只留引用过"过滤,免得把补充来源筛掉
+        merged, seen = [], set()
+        for s in (url_sources + sources + prior_sources):
+            u = s.get("url")
+            if u and u not in seen:
+                seen.add(u); merged.append(s)
+        sources = merged
+    else:
+        sources = _cited_sources(sources, full)      # 普通执行:只留正文真正引用到的来源
     res = {"id": step["id"], "name": step["name"], "type": step.get("type", ""),
            "main_conclusion": concl, "detailed": detailed, "sources": sources}
     return res, render_html.md_to_html(detailed) + render_html.sources_html(sources)
@@ -454,6 +828,7 @@ def _persist(topic, data, iterations, done):
     import render_html
     plan_path = f"{topic}_plan.json"
     json.dump({"topic": topic, "plan": data, "plan_iterations": iterations,
+               "lang": (_RUNS.get(topic) or {}).get("lang", "zh"),
                "results": [done[i] for i in sorted(done)]},
               open(plan_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     try:
@@ -462,33 +837,105 @@ def _persist(topic, data, iterations, done):
         pass
     return plan_path
 
-def retry_one(topic, step_id, search_key=None, llm_key=None):
-    """重跑单个步骤(供前端"重试此步"按钮)。缓存没有就从 _plan.json 重建。返回 step_done / step_error 事件。"""
+def _downstream_ids(steps, sid):
+    """返回(传递闭包地)依赖 sid 的所有下游步骤 id,升序。steps={id:step}。"""
+    sid = int(sid)
+    deps_of = {i: set(s.get("depends_on") or []) for i, s in steps.items()}
+    out, frontier = set(), {sid}
+    changed = True
+    while changed:
+        changed = False
+        for i, ds in deps_of.items():
+            if i not in out and (frontier & ds):
+                out.add(i); frontier.add(i); changed = True
+    return sorted(out)
+
+def _load_state(topic):
+    """取运行状态:内存缓存优先,没有就从 _plan.json 重建(服务器重启后仍可重试/返工)。"""
     st = _RUNS.get(topic)
     if not st:
-        try:
-            d = json.load(open(f"{topic}_plan.json", encoding="utf-8"))
-        except Exception as e:
-            return {"type": "step_error", "id": step_id, "msg": f"无运行缓存且读 json 失败: {e}"}
+        d = json.load(open(f"{topic}_plan.json", encoding="utf-8"))   # 抛错由调用方兜
         st = {"data": d["plan"], "iterations": d.get("plan_iterations", []),
               "steps": {s["id"]: s for s in d["plan"]["steps"]},
               "done": {r["id"]: r for r in d.get("results", [])},
-              "search_key": None, "llm_key": None, "corpus": None}
+              "search_key": None, "llm_key": None, "corpus": None, "lang": d.get("lang", "zh")}
         _RUNS[topic] = st
+    return st
+
+def import_plan(plan_obj):
+    """导入用户上传的一份 plan.json(dict):校验 → 落盘为工作副本 → 载入运行状态。
+    返回 topic。校验失败抛 ValueError。只载入这一份,不自动聚合历史。"""
+    if not isinstance(plan_obj, dict):
+        raise ValueError("不是有效的 JSON 对象")
+    plan = plan_obj.get("plan") or {}
+    steps = plan.get("steps")
+    if not (isinstance(steps, list) and steps):
+        raise ValueError("JSON 里缺少 plan.steps —— 似乎不是本工具导出的研究文件")
+    topic = re.sub(r'[\\/:*?"<>|]', "_", (plan_obj.get("topic") or "导入的研究").strip()) or "导入的研究"
+    plan_obj["topic"] = topic
+    json.dump(plan_obj, open(os.path.join(HERE, f"{topic}_plan.json"), "w", encoding="utf-8"),
+              ensure_ascii=False, indent=2)          # 落盘为工作副本,供 refine/retry/persist 复用
+    _RUNS.pop(topic, None)                            # 清掉旧内存态,强制从新文件重建
+    _load_state(topic)
+    return topic
+
+def _redo_step(topic, step_id, search_key, llm_key, feedback=""):
+    """重跑/返工单步:feedback 非空即带用户反馈返工。返回 step_done / step_error 事件。"""
+    try:
+        st = _load_state(topic)
+    except Exception as e:
+        return {"type": "step_error", "id": step_id, "msg": f"无运行缓存且读 json 失败: {e}"}
     sid = int(step_id)
     step = st["steps"].get(sid)
     if not step:
-        return {"type": "step_error", "id": sid, "msg": "找不到该步骤"}
+        return {"type": "step_error", "id": sid,
+                "msg": "该步骤状态已丢失(多半是后端重启过)。点顶栏「↻ 重试 / 继续」从已保存进度恢复后,再返工此页。"}
+    prior_res = st["done"].get(sid)
+    prior = (prior_res or {}).get("detailed", "")
     try:
         res, html = _exec_one(step, st["done"], search_key or st.get("search_key"),
                               llm_key or st.get("llm_key"), st.get("corpus"), topic=topic,
-                              detail=st.get("detail", ""))
+                              detail=st.get("detail", ""), feedback=feedback, prior=prior,
+                              lang=st.get("lang", "zh"))
+        if feedback and prior_res:                       # 返工:先把上一版存进 prev,供一键还原
+            st.setdefault("prev", {})[sid] = prior_res
         st["done"][sid] = res
         _persist(topic, st["data"], st.get("iterations", []), st["done"])
+        # 这一步变了,告知前端哪些下游步骤依赖它(只在已完成的下游里提示,可选连带刷新)
+        down = [i for i in _downstream_ids(st["steps"], sid) if i in st["done"]]
         return {"type": "step_done", "id": sid, "conclusion": res["main_conclusion"],
-                "detailed_html": html, "sources": res["sources"]}
+                "detailed_html": html, "sources": res["sources"], "downstream": down,
+                "can_revert": bool(feedback and prior_res)}
     except Exception as e:
         return {"type": "step_error", "id": sid, "msg": f"{type(e).__name__}: {e}"}
+
+def retry_one(topic, step_id, search_key=None, llm_key=None):
+    """重跑单个步骤(前端"重试此步")。"""
+    return _redo_step(topic, step_id, search_key, llm_key)
+
+def refine_one(topic, step_id, feedback, search_key=None, llm_key=None):
+    """带用户反馈返工单步(前端"反馈返工")。"""
+    if not (feedback or "").strip():
+        return {"type": "step_error", "id": step_id, "msg": "反馈为空"}
+    return _redo_step(topic, step_id, search_key, llm_key, feedback=feedback)
+
+def revert_one(topic, step_id):
+    """还原某步到返工前的上一版(前端"还原上一版")。"""
+    import render_html
+    try:
+        st = _load_state(topic)
+    except Exception as e:
+        return {"type": "step_error", "id": step_id, "msg": f"读状态失败: {e}"}
+    sid = int(step_id)
+    prev = (st.get("prev") or {}).get(sid)
+    if not prev:
+        return {"type": "step_error", "id": sid, "msg": "没有可还原的上一版(返工前的版本未缓存,或后端重启过)"}
+    st["done"][sid] = prev
+    st["prev"].pop(sid, None)
+    _persist(topic, st["data"], st.get("iterations", []), st["done"])
+    html = render_html.md_to_html(prev.get("detailed", "")) + render_html.sources_html(prev.get("sources", []))
+    return {"type": "step_done", "id": sid, "conclusion": prev.get("main_conclusion", ""),
+            "detailed_html": html, "sources": prev.get("sources", [])}
 
 # ---------------- 编排 ----------------
 def run(topic, n_steps=7, corpus=None):
@@ -569,6 +1016,9 @@ EXEC_SYS_TEXT = """你在执行一份行研计划中的某一步,产出高质量
 - 【说有的、略没有的】只写有检索证据或扎实专业共识支撑的内容。检索没覆盖、又不是该步要害的,一句带过或直接略过即可;绝不要为了"完整/对称"先搭一个小标题或表格框架、再逐格宣告"本次检索未覆盖"——空框架是噪音,不是严谨。宁可短而实,不要长而空。
 - 【数字克制】数字是为支撑结论服务的,不是越多越精确越显得专业。只有当某个量真正决定判断、且有可靠来源时,才给精确值并标来源;否则用定性、量级或方向性描述,或直接写"该维度缺乏可靠公开数据"。严禁为了显得严谨而堆砌无来源的精确数字。查不到精确值时,可用代理指标/区间逼近并说明推算路径,但若连可靠的近似基础都没有,就如实说缺,不要硬造。
 - 【表格/矩阵克制】对比矩阵只填有依据的格子;没有可靠数据的格子,留"—"或用定性等级(高/中/低)并注明系定性判断。绝不用看似精确实则杜撰的数字把矩阵撑满。维度也按数据可得性取舍,不必每个维度都凑齐。
+- 【就地全收,不向外联想】当一条检索命中或一段证据里,除了你要找的对象之外还并列着同类的实物数据(如同一篇文章顺带列了多家公司的产能、同一张表含多行同维度数据),把这些一并收入,别只摘匹配查询的那一条——已经摆在眼前的数据不要浪费。严格边界:这只针对"已在你手上的证据里物理存在"的数据;绝不是借此发散去联想或脑补未出现的关联领域(例如由 DHA 联想去补整个鱼油/Omega-3 市场),没在证据里出现的就是没有,不收、不造。
+- 【核实按材料性排序】当要逐条核实一批数字(如一张产能/份额名单)时,把核实精力优先给"错了就会推翻结论"的大额/关键条目;尾部小量级条目可只做轻校验或标"单源待核"。不要平均用力,更不要因为尾部条目好查就把检索预算耗在那里。
+- 【成品口吻,不留工作痕迹】你的输出是给读者的成品报告,不是工作记录或与助手的对话。严禁出现过程性/工具性措辞:如"根据用户提供的网址/链接""本次检索""本次核实""该网页被爬虫限制/抓取失败/需登录""参考资料中未包含"等。来源正常引用即可(标题/机构/日期)。数据确有缺失时,只中性陈述数据本身的缺口(如"公开渠道未见该产能的权威披露"),不要用"本次…未能获取"这种带动作的说法,更不要描述抓取/检索的技术过程。
 - 信息纪律(下列只在"已经有数据"时适用,绝不是凭空造数或强行对标的理由):① 按可信度加权——监管/审计约束(交易所披露、年报、统计公报)> 行业协会(有口径)> 龙头公司 IR > 投融资/并购新闻(真实交易事件)> 付费库 > 咨询 PR/研报"预测数" > 博客/排名站;凡"卖东西"的信源其数字打折看。前沿/新兴技术尤其要重投融资与并购新闻——"谁拿了哪轮、谁被谁收购"是比咨询机构市场规模预览版更硬的玩家与景气信号(但融资金额/估值可能有水分,只取事件本身、估值做参考)。② 关键数字若只有单一来源,标注"(单源,待二次信源核实)";cross-check 是"当确有两条独立来源时,对上则提高置信度",不是"必须给每个数字都配两个来源",更不是"没来源也要硬凑一个对标值"。③ 时效折扣:竞争/客户数据超 5 年、技术数据超 10 年存疑;"预测数"慎用。④ 事实与判断分离:先呈现事实,判断须立足所列事实并说清依据。
 输出格式(不要 JSON,不要任何前言):第一行以"结论："开头写一句话核心结论;然后空一行,写详细展开(markdown,可分点/表格)。"""
 
@@ -579,27 +1029,41 @@ def parse_text_result(text):
     concl, rest_start = "", 0
     for idx, ln in enumerate(lines):
         if ln.strip():
-            concl = re.sub(r"^[#>\-\s]*结论[：:]\s*", "", ln.strip())
+            concl = re.sub(r"^[#>\-\s*]*(?:结论|Conclusion)\s*[：:]\s*", "", ln.strip(), flags=re.I)
             rest_start = idx + 1
             break
     detailed = "\n".join(lines[rest_start:]).strip()
     return concl or text[:80], detailed or text
 
-def run_stream(topic, llm_key=None, search_key=None, n_steps=7, corpus=None, resume=False, detail=""):
+def run_stream(topic, llm_key=None, search_key=None, n_steps=7, corpus=None, resume=False, detail="", deep_verify=False, lang="zh"):
     """生成器:逐事件 yield dict,供 SSE 推给前端。
     resume=True:断线续跑——复用缓存的 plan,跳过已完成步、补发其结果,接着跑剩下的(浏览器掉线不必重头)。"""
     import render_html
     try:
-        if resume and topic in _RUNS:
-            # —— 续跑:复用上次规划与已完成结果,不重新规划 ——
-            st = _RUNS[topic]
-            data, iterations = st["data"], st["iterations"]
+        # —— 续跑:内存缓存优先;没有(如后端重启过)就从 _plan.json 重建,跳过已完成步 ——
+        st = None
+        if resume:
+            if topic in _RUNS:
+                st = _RUNS[topic]
+            else:
+                try:
+                    st = _load_state(topic)          # 从盘上 _plan.json 把规划+已完成结果读回来
+                except Exception:
+                    st = None                         # 盘上也没有 -> 退回从头规划
+        if st is not None:
+            data, iterations = st["data"], st.get("iterations", [])
             steps = sorted(st["steps"].values(), key=lambda s: s["id"])
             done = st["done"]
             if search_key: st["search_key"] = search_key
             if llm_key: st["llm_key"] = llm_key
             detail = st.get("detail", detail)
-            yield {"type": "status", "msg": "恢复上次进度…"}
+            lang = st.get("lang", lang)
+            st.setdefault("budget", {"left": SEARCH_BUDGET})   # 重建态可能没预算,给个默认别卡住补搜
+            n_done = len(done)
+            yield {"type": "status",
+                   "msg": f"恢复上次进度…(已完成 {n_done} 步,不重跑)" if n_done else "恢复上次进度…"}
+            # 先吐一份完整框架:冷页面(导入/刷新后)据此把卡片+左边目录整份建出来,再由下面的 step_done 填充
+            yield {"type": "plan_iter", "k": 4, "label": "已载入", "plan": data}
         else:
             # —— 预检索:规划前先宽口径搜一眼,让模型知道"有哪些数据查得到" ——
             probe, probe_items, pre_used = "", [], 0
@@ -613,7 +1077,7 @@ def run_stream(topic, llm_key=None, search_key=None, n_steps=7, corpus=None, res
             # —— 多轮迭代规划:每轮整页产出 plan_iter(含完整 instruction/rubric/deep_thinking) ——
             yield {"type": "status", "msg": "深度思考中…"}
             data, iterations = None, []
-            for ev in plan_iters(topic, llm_key=llm_key, stream_iter1=False, detail=detail, probe=probe):
+            for ev in plan_iters(topic, llm_key=llm_key, stream_iter1=False, detail=detail, probe=probe, lang=lang):
                 if ev["type"] == "plan_iter":
                     iterations.append({"k": ev["k"], "label": ev["label"], "steps": ev["plan"]["steps"]})
                     yield {"type": "status", "msg": f"规划 Iter{ev['k']}/4 · {ev['label']}"}
@@ -629,7 +1093,7 @@ def run_stream(topic, llm_key=None, search_key=None, n_steps=7, corpus=None, res
             _RUNS[topic] = {"data": data, "iterations": iterations,
                             "steps": {s["id"]: s for s in steps}, "done": done,
                             "search_key": search_key, "llm_key": llm_key, "corpus": corpus,
-                            "detail": detail, "budget": {"left": max(0, SEARCH_BUDGET - pre_used)}}
+                            "detail": detail, "lang": lang, "budget": {"left": max(0, SEARCH_BUDGET - pre_used)}}
 
         dt = data.get("deep_thinking", {})
         yield {"type": "meta", "topic": topic,
@@ -654,7 +1118,8 @@ def run_stream(topic, llm_key=None, search_key=None, n_steps=7, corpus=None, res
             try:
                 res, html = _exec_one(s, done, search_key or _RUNS[topic].get("search_key"),
                                       llm_key or _RUNS[topic].get("llm_key"), corpus, topic=topic,
-                                      detail=detail, budget=_RUNS[topic].get("budget"))
+                                      detail=detail, budget=_RUNS[topic].get("budget"), deep=deep_verify,
+                                      lang=_RUNS[topic].get("lang", lang))
                 done[sid] = res
                 _persist(topic, data, iterations, done)
                 yield {"type": "step_done", "id": sid, "conclusion": res["main_conclusion"],

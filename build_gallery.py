@@ -8,6 +8,12 @@ import json, os, shutil, html, re
 HERE = os.path.dirname(os.path.abspath(__file__))
 DOCS = os.path.join(HERE, "docs")
 RDIR = os.path.join(DOCS, "reports")
+DRAFTS = os.path.join(HERE, "drafts")
+
+def _src(name):
+    """报告/plan 源现放在 drafts/,兼容仍在根目录的情况。"""
+    d = os.path.join(DRAFTS, name)
+    return d if os.path.isfile(d) else os.path.join(HERE, name)
 
 # (slug, 主题, 类型标签)
 CURATED = [
@@ -19,7 +25,7 @@ CURATED = [
 def teaser(topic):
     """从 <主题>_plan.json 摘一句话当卡片副文案。"""
     try:
-        d = json.load(open(os.path.join(HERE, f"{topic}_plan.json"), encoding="utf-8"))
+        d = json.load(open(_src(f"{topic}_plan.json"), encoding="utf-8"))
         dt = d.get("plan", {}).get("deep_thinking", {})
         t = dt.get("context_analysis") or ""
         t = re.sub(r"\s+", " ", t).strip()
@@ -35,7 +41,7 @@ def main():
     os.makedirs(RDIR, exist_ok=True)
     cards = []
     for slug, topic, tag in CURATED:
-        src = os.path.join(HERE, f"{topic}_report.html")
+        src = _src(f"{topic}_report.html")
         if not os.path.isfile(src):
             print(f"  [skip] 缺报告: {topic}_report.html"); continue
         shutil.copyfile(src, os.path.join(RDIR, f"{slug}.html"))
