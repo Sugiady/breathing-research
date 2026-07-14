@@ -17,9 +17,11 @@ def _src(name):
 
 # (slug, 主题, 类型标签)
 CURATED = [
-    ("anti-fouling",           "Anti Fouling",       "技术综述"),
-    ("zhejiang-textile",       "浙江省纺织产业集群",  "产业集群"),
-    ("algal-dha",              "藻油DHA",            "产业研究"),
+    ("anti-fouling",           "Anti Fouling",              "技术综述"),
+    ("zhejiang-textile",       "浙江省纺织产业集群",         "产业集群"),
+    ("algal-dha",              "藻油DHA",                   "产业研究"),
+    ("green-hydrogen",         "绿氢下游应用",               "产业研究"),
+    ("15th-plan-mfg",          "“十五五”规划纲要制造业相关",  "政策研究"),
 ]
 
 def teaser(topic):
