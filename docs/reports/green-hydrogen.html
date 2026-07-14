@@ -56,12 +56,21 @@ ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px 
 .dot.active{background:var(--green);transform:scale(1.3)}
 .pos{font-size:12px;color:var(--mut);min-width:54px;text-align:center}
 .hint{position:absolute;top:14px;right:20px;font-size:12px;color:var(--mut);background:#fff;border:1px solid var(--line);padding:4px 10px;border-radius:20px}
-/* ---- 手机/平板:两栏改上下堆叠,滑动区给足高度 ---- */
+/* ---- 手机/平板:目录改悬浮下拉(☰ 开关),正文全屏,和实时界面一致 ---- */
+.menu-btn{display:none;position:fixed;top:12px;left:12px;z-index:30;align-items:center;gap:5px;
+  border:1px solid var(--line);background:#fff;color:var(--mut);padding:6px 12px;border-radius:9px;
+  font-size:13px;cursor:pointer;box-shadow:0 3px 12px rgba(80,110,90,.12)}
+.menu-btn:hover{border-color:var(--green);color:var(--green-d)}
 @media (max-width:820px){
-  .wrap{grid-template-columns:1fr;height:auto;min-height:100vh}
-  .left{max-height:38vh;border-right:none;border-bottom:1px solid var(--line);padding:20px 18px}
+  .wrap{grid-template-columns:1fr;height:100vh}
+  .left{position:fixed;top:0;left:0;right:0;z-index:25;max-height:76vh;overflow:auto;
+    border-right:none;border-bottom:1px solid var(--line);padding:52px 18px 22px;
+    transform:translateY(-101%);transition:transform .3s cubic-bezier(.22,.61,.36,1);
+    box-shadow:0 12px 30px rgba(80,110,90,.18)}
+  .left.open{transform:translateY(0)}
   .left h1{font-size:22px}.left .sub{margin-bottom:16px}
-  .right{height:62vh}
+  .right{height:100vh}
+  .menu-btn{display:inline-flex}
   .card{padding:22px 18px 44px}
   .card-head h2{font-size:19px}
   .concl{font-size:14.5px;padding:12px 14px}
@@ -69,7 +78,7 @@ ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px 
   .hint{display:none}
 }
 @media (max-width:480px){
-  .left{max-height:34vh}.right{height:66vh}
+  .left{max-height:80vh;padding-top:50px}
   .card{padding:18px 14px 40px}
   .card-head h2{font-size:18px}
   .nav button.arrow{width:34px;height:34px;font-size:16px}
@@ -604,6 +613,13 @@ ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px 
   var DRAG_TH=8;   // 横向移动超过此阈值(且横>纵)才算"拖动翻页",否则放行选词/纵向滚动
   var kps=[].slice.call(document.querySelectorAll("ul.kp li"));
   var dots=[].slice.call(document.querySelectorAll(".dot"));
+  // 手机版:目录悬浮下拉(按钮由 JS 建,桌面端 CSS 隐藏);点要点/翻页后自动收起
+  var leftPanel=document.querySelector(".left");
+  var menuBtn=document.createElement("button");
+  menuBtn.className="menu-btn"; menuBtn.type="button"; menuBtn.textContent="☰ 目录";
+  document.body.appendChild(menuBtn);
+  menuBtn.onclick=function(){leftPanel.classList.toggle("open")};
+  function closeMenu(){leftPanel.classList.remove("open")}
   function render(anim){
     track.classList.toggle("snap",!!anim);
     track.style.transform="translateX("+(-i*w+dx)+"px)";
@@ -611,7 +627,7 @@ ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px 
     dots.forEach(function(d,k){d.classList.toggle("active",k===i)});
     kps.forEach(function(li){li.classList.toggle("active",li.getAttribute("data-go")==String(i))});
   }
-  function go(n){i=Math.max(0,Math.min(N-1,n));dx=0;render(true)}
+  function go(n){i=Math.max(0,Math.min(N-1,n));dx=0;render(true);closeMenu();}
   function measure(){w=track.clientWidth;render(false)}
   window.addEventListener("resize",measure);
   document.getElementById("next").onclick=function(){go(i+1)};
