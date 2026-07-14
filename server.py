@@ -15,8 +15,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import research_agent
 
-PORT = 8770
-BUILD = "2026-07-05-wrapup"   # 改代码时改这里;GET /ping 可确认连的是不是新代码
+PORT = int(os.environ.get("PORT", "8770"))       # PaaS(Render 等)会注入 $PORT
+HOST = os.environ.get("HOST", "127.0.0.1")       # 本机默认只听 localhost;线上部署设 0.0.0.0
+BUILD = "2026-07-14-deploy"   # 改代码时改这里;GET /ping 可确认连的是不是新代码
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # 静音访问日志
@@ -105,6 +106,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")   # 关反向代理缓冲:否则"呼吸"流式被攒着一次性吐
         self.end_headers()
 
         def push(ev):
@@ -124,11 +126,12 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     try:
-        srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+        srv = ThreadingHTTPServer((HOST, PORT), Handler)
     except OSError as e:
         print(f"!! 端口 {PORT} 被占用(可能有上次没退干净的进程)。先释放它,或改 server.py 里的 PORT。\n   {e}")
         sys.exit(1)
-    print(f"行研 Agent 本地服务启动 -> http://localhost:{PORT}  (Ctrl+C 停止)")
+    where = f"http://localhost:{PORT}" if HOST in ("127.0.0.1", "localhost") else f"{HOST}:{PORT}"
+    print(f"行研 Agent 服务启动 -> {where}  (Ctrl+C 停止)")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

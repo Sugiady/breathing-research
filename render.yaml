@@ -1,0 +1,19 @@
+# Render 蓝图(Blueprint):在 Render 里 New → Blueprint → 选这个仓库 → Apply 即可部署。
+# 纯 Python 标准库,无第三方依赖;Render 自动注入 $PORT,server.py 已读取。
+services:
+  - type: web
+    name: breathing-research
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt   # requirements 为空,仅为让 Render 识别为 Python 服务
+    startCommand: python server.py
+    envVars:
+      - key: HOST
+        value: 0.0.0.0            # 线上必须监听 0.0.0.0(本机默认 127.0.0.1)
+      - key: PYTHON_VERSION
+        value: "3.13.2"
+      # —— 下面两个 key 可选:在 Render 后台填了 => 访客用你的额度;留空 => 访客自带 key ——
+      - key: DEEPSEEK_API_KEY
+        sync: false              # sync:false = 值不写进仓库,在 Render 后台手动填
+      - key: BOCHA_API_KEY
+        sync: false

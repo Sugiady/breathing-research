@@ -26,7 +26,25 @@ TODAY = datetime.date.today().isoformat()
 YEAR = datetime.date.today().year
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CFG = json.load(open(os.path.join(HERE, "deepseek_api.json"), encoding="utf-8"))
+
+def _load_cfg():
+    """DeepSeek 配置:优先本地 deepseek_api.json(本机开发),缺字段用环境变量兜底(服务器部署)。
+    apiKey 允许为空——线上可让访客自带 key(前端字段按请求覆盖),服务器不必存密钥;
+    请求真正调用时若 key 仍为空,call_llm 会带出 401,由前端提示用户填 key。"""
+    cfg = {}
+    fp = os.path.join(HERE, "deepseek_api.json")
+    if os.path.isfile(fp):
+        try:
+            cfg = json.load(open(fp, encoding="utf-8"))
+        except Exception:
+            cfg = {}
+    cfg.setdefault("baseUrl", os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
+    cfg.setdefault("model", os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro"))
+    if not cfg.get("apiKey"):        # 文件缺失或占位符为空 -> 环境变量兜底
+        cfg["apiKey"] = os.environ.get("DEEPSEEK_API_KEY", "")
+    return cfg
+
+CFG = _load_cfg()
 
 # 最近一次运行的状态缓存(按主题),供"重试某步"用;服务器重启后可从 _plan.json 重建
 _RUNS = {}
@@ -45,7 +63,7 @@ def _fast_model():
                 return m
         except Exception:
             pass
-    return CFG.get("fastModel") or CFG["model"]
+    return os.environ.get("DEEPSEEK_FAST_MODEL") or CFG.get("fastModel") or CFG["model"]
 
 FAST_MODEL = _fast_model()
 
@@ -92,10 +110,15 @@ def extract_json(text):
 def _bocha_key():
     """从 bocha_api.json 读 key(字段名容忍 apiKey/api_key/key)。文件不存在或没 key -> None。"""
     path = os.path.join(HERE, "bocha_api.json")
-    if not os.path.isfile(path):
-        return None
-    d = json.load(open(path, encoding="utf-8"))
-    return d.get("apiKey") or d.get("api_key") or d.get("key")
+    if os.path.isfile(path):
+        try:
+            d = json.load(open(path, encoding="utf-8"))
+            k = d.get("apiKey") or d.get("api_key") or d.get("key")
+            if k:
+                return k
+        except Exception:
+            pass
+    return os.environ.get("BOCHA_API_KEY") or None      # 服务器部署:key 走环境变量
 
 def _bocha_items(query, count=8, key=None):
     """博查 Web Search,返回结构化条目列表 [{name,url,date,site,summary}]。无 key/失败 -> []。"""

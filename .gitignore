@@ -15,5 +15,9 @@
 !deepseek_api.example.json
 !bocha_api.example.json
 
+# —— 放行:部署配置(Render 蓝图等,不含密钥)——
+!render.yaml
+!requirements.txt
+
 # —— 放行:GitHub Pages 画廊(静态报告,已确认无密钥)——
 !docs/
