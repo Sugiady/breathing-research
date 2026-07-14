@@ -12,8 +12,12 @@ services:
         value: 0.0.0.0            # 线上必须监听 0.0.0.0(本机默认 127.0.0.1)
       - key: PYTHON_VERSION
         value: "3.13.2"
-      # —— 下面两个 key 可选:在 Render 后台填了 => 访客用你的额度;留空 => 访客自带 key ——
+      # —— 下面几个都在 Render 后台手动填(sync:false = 不写进公开仓库)——
+      # 访问口令:填了 => 全站需口令才能用;留空 => 不设防
+      - key: ACCESS_PASSWORD
+        sync: false
+      # API key 可选:填了 => 访客用你的额度;留空 => 访客自带 key
       - key: DEEPSEEK_API_KEY
-        sync: false              # sync:false = 值不写进仓库,在 Render 后台手动填
+        sync: false
       - key: BOCHA_API_KEY
         sync: false

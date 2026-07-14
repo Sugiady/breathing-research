@@ -17,17 +17,48 @@ import research_agent
 
 PORT = int(os.environ.get("PORT", "8770"))       # PaaS(Render 等)会注入 $PORT
 HOST = os.environ.get("HOST", "127.0.0.1")       # 本机默认只听 localhost;线上部署设 0.0.0.0
-BUILD = "2026-07-14-deploy"   # 改代码时改这里;GET /ping 可确认连的是不是新代码
+ACCESS_PW = os.environ.get("ACCESS_PASSWORD", "")  # 设了 = 全站需口令;留空 = 不设防(本机默认)。别写进代码,在 Render 后台填。
+BUILD = "2026-07-14-gate"   # 改代码时改这里;GET /ping 可确认连的是不是新代码
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # 静音访问日志
         pass
 
+    def _pw_ok(self, pw):
+        """未设 ACCESS_PW 则一律放行;设了则必须完全匹配。"""
+        return (not ACCESS_PW) or (pw or "") == ACCESS_PW
+
     def do_GET(self):
         if self.path == "/ping":
-            data = json.dumps({"ok": True, "build": BUILD}).encode("utf-8")
+            # auth 告诉前端要不要显示口令框(值本身绝不外传)
+            data = json.dumps({"ok": True, "build": BUILD, "auth": bool(ACCESS_PW)}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data); return
+        if self.path.startswith("/download"):
+            # 导出干净的独立报告 HTML(附件下载)。GET 带 topic + pw(口令走 query)。
+            from urllib.parse import urlparse, parse_qs, quote
+            q = parse_qs(urlparse(self.path).query)
+            topic = (q.get("topic") or [""])[0]
+            if not self._pw_ok((q.get("pw") or [""])[0]):
+                self.send_error(403, "access denied"); return
+            if not topic:
+                self.send_error(400, "missing topic"); return
+            plan_path, report_path = f"{topic}_plan.json", f"{topic}_report.html"
+            try:
+                if not os.path.isfile(report_path):
+                    if not os.path.isfile(plan_path):
+                        self.send_error(404, "no such research"); return
+                    import render_html; render_html.build(plan_path)
+                data = open(report_path, encoding="utf-8").read().encode("utf-8")
+            except Exception as e:
+                self.send_error(500, f"{type(e).__name__}: {e}"); return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Disposition",
+                             "attachment; filename*=UTF-8''" + quote(f"{topic}_report.html"))
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data); return
@@ -64,6 +95,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/import":          # 上传一份 plan.json 导入,返回 {ok, topic}
             req = self._read_json()
+            if not self._pw_ok(req.get("pw")):
+                self._send_json({"ok": False, "msg": "访问口令错误"}); return
             try:
                 topic = research_agent.import_plan(req.get("plan"))
                 self._send_json({"ok": True, "topic": topic})
@@ -72,6 +105,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path in ("/retry", "/refine", "/revert"):   # 重试/反馈返工/还原上一版,返回单条 JSON(非SSE)
             req = self._read_json()
+            if not self._pw_ok(req.get("pw")):
+                self._send_json({"type": "step_error", "id": req.get("id"), "msg": "访问口令错误"}); return
             topic = (req.get("topic") or "").strip()
             sk = (req.get("search_key") or "").strip() or None
             lk = (req.get("llm_key") or "").strip() or None
@@ -112,6 +147,10 @@ class Handler(BaseHTTPRequestHandler):
         def push(ev):
             self.wfile.write(b"data: " + json.dumps(ev, ensure_ascii=False).encode("utf-8") + b"\n\n")
             self.wfile.flush()
+
+        if not self._pw_ok(req.get("pw")):            # 口令不对:走 SSE 吐一条错误再收尾,前端照常显示
+            push({"type": "error", "msg": "访问口令错误或缺失,请回首页重新输入口令。"})
+            return
 
         try:
             for ev in research_agent.run_stream(topic, llm_key=llm_key, search_key=search_key, resume=resume, detail=detail, deep_verify=deep, lang=lang):

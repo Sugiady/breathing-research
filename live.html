@@ -98,8 +98,9 @@ li.filled .kp-no{background:var(--green)}
 .cascade-bar{background:#fff7ed;border:1px solid #f0d8b8;color:#8a5a1f;border-radius:11px;
   padding:11px 14px;margin:0 0 16px;font-size:13px;line-height:1.7;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .cascade-bar button{margin-left:4px}
+.topbtns{margin-left:auto;display:flex;gap:6px;flex:none}
 .topbtn{border:1px solid var(--line);background:#fff;color:var(--mut);padding:4px 11px;border-radius:8px;
-  cursor:pointer;font-size:12.5px;margin-left:auto;flex:none;transition:.15s}
+  cursor:pointer;font-size:12.5px;flex:none;transition:.15s}
 .topbtn:hover{border-color:var(--green);color:var(--green-d)}
 .dot.err{background:#c0392b}
 .body.streaming::after{content:"▍";color:var(--green);animation:blink 1s steps(2) infinite}
@@ -128,6 +129,34 @@ li.filled .kp-no{background:var(--green)}
 .dot.active{background:var(--green);transform:scale(1.3)}.dot.done{background:var(--green-d)}
 .pos{font-size:12px;color:var(--mut);min-width:52px;text-align:center}
 .saved{font-size:12px;color:var(--green-d)}
+.menu-btn{display:none;align-items:center;gap:5px;border:1px solid var(--line);background:#fff;color:var(--mut);
+  padding:4px 11px;border-radius:8px;font-size:12.5px;cursor:pointer;flex:none}
+.menu-btn:hover{border-color:var(--green);color:var(--green-d)}
+/* ---- 手机/平板:目录改悬浮下拉,滑动区给足高度,底部进度点不再被挤没 ---- */
+@media (max-width:820px){
+  .wrap{grid-template-columns:1fr;height:100vh}
+  .left{position:fixed;top:0;left:0;right:0;z-index:20;max-height:72vh;overflow:auto;
+    border-right:none;border-bottom:1px solid var(--line);padding:18px 18px 22px;
+    transform:translateY(-101%);transition:transform .3s cubic-bezier(.22,.61,.36,1);
+    box-shadow:0 12px 30px rgba(80,110,90,.18)}
+  .left.open{transform:translateY(0)}
+  .left h1{font-size:20px}.left .sub{margin-bottom:16px}
+  .right{height:100vh}
+  .menu-btn{display:inline-flex}
+  .card{padding:22px 16px 46px}
+  .card-head h2{font-size:18px}
+  .concl{font-size:14.5px;padding:12px 14px}
+  .body{font-size:14px}.body table{font-size:12px}
+  .topbar #statusText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .nav{padding:9px;gap:10px}
+  .nav button.arrow{width:34px;height:34px;font-size:16px}
+}
+@media (max-width:480px){
+  .left{max-height:76vh}
+  .card{padding:18px 13px 42px}
+  .card-head h2{font-size:17px}
+  .topbtn,.menu-btn{padding:4px 8px;font-size:12px}
+}
 </style></head>
 <body>
 
@@ -149,6 +178,10 @@ li.filled .kp-no{background:var(--green)}
     <input id="llmkey" type="password" data-i18n-ph="留空 → 用本地 deepseek_api.json" placeholder="留空 → 用本地 deepseek_api.json">
     <label for="searchkey" data-i18n="搜索 API Key(可选)">搜索 API Key(可选)</label>
     <input id="searchkey" type="password" data-i18n-ph="留空 → 用本地 bocha_api.json(没有则新闻步走模型知识)" placeholder="留空 → 用本地 bocha_api.json(没有则新闻步走模型知识)">
+    <div id="pwWrap" style="display:none">
+      <label for="accesspw" data-i18n="访问口令">访问口令</label>
+      <input id="accesspw" type="password" data-i18n-ph="本站需口令才能使用" placeholder="本站需口令才能使用">
+    </div>
     <label class="deepline"><input type="checkbox" id="deepChk"> <span data-i18n="深度核实(名单/产能类逐个免费追查·慢,~140s/步)">深度核实(名单/产能类逐个免费追查·慢,~140s/步)</span></label>
     <button class="go" id="goBtn" data-i18n="点 亮">点 亮</button>
     <div class="hintline" data-i18n="key 只发往本机服务,不写入页面、不上传第三方。">key 只发往本机服务,不写入页面、不上传第三方。</div>
@@ -167,7 +200,7 @@ li.filled .kp-no{background:var(--green)}
     <ul class="kp" id="kp"></ul>
   </aside>
   <section class="right">
-    <div class="topbar"><span class="breath" id="breath"></span><span id="statusText" data-i18n="待命">待命</span><span class="saved" id="saved"></span><button class="topbtn" id="resumeBtn" data-i18n="↻ 重试 / 继续" data-i18n-title="断点续跑:跳过已完成步,重试规划/未完成步" title="断点续跑:跳过已完成步,重试规划/未完成步">↻ 重试 / 继续</button></div>
+    <div class="topbar"><button class="menu-btn" id="menuBtn" data-i18n="☰ 目录">☰ 目录</button><span class="breath" id="breath"></span><span id="statusText" data-i18n="待命">待命</span><span class="saved" id="saved"></span><span class="topbtns"><button class="topbtn" id="exportBtn" style="display:none" data-i18n="⬇ 导出" data-i18n-title="下载干净的独立报告 HTML(离线可看、可转发)" title="下载干净的独立报告 HTML(离线可看、可转发)">⬇ 导出</button><button class="topbtn" id="resumeBtn" data-i18n="↻ 重试 / 继续" data-i18n-title="断点续跑:跳过已完成步,重试规划/未完成步" title="断点续跑:跳过已完成步,重试规划/未完成步">↻ 重试 / 继续</button></span></div>
     <div class="stage"><div class="track snap" id="track"></div></div>
     <div class="nav">
       <button class="arrow" id="prev">‹</button>
@@ -184,7 +217,7 @@ var track=document.getElementById("track"), dotsEl=document.getElementById("dots
     statusText=document.getElementById("statusText"), savedEl=document.getElementById("saved");
 var cards={}, order=[], i=0, w=0, dx=0, dragging=false, pending=false, startX=0, startY=0;
 var DRAG_TH=8;   // 横向超此阈值(且横>纵)才翻页,否则放行选词/纵向滚动
-var TOPIC="", DETAIL="", LLMKEY="", SEARCHKEY="", DEEP=false, LANG="zh";   // 供 retryStep 复用
+var TOPIC="", DETAIL="", LLMKEY="", SEARCHKEY="", DEEP=false, LANG="zh", PW="", AUTH=false;   // 供 retryStep 复用
 
 function esc(s){return (s==null?"":""+s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
 
@@ -210,7 +243,12 @@ var I18N={en:{
   "核心要点":"Key points",
   "待命":"Standby",
   "↻ 重试 / 继续":"↻ Retry / Resume",
-  "断点续跑:跳过已完成步,重试规划/未完成步":"Resume: skip finished steps, retry planning / unfinished"
+  "断点续跑:跳过已完成步,重试规划/未完成步":"Resume: skip finished steps, retry planning / unfinished",
+  "访问口令":"Access password",
+  "本站需口令才能使用":"Password required to use this site",
+  "☰ 目录":"☰ Contents",
+  "⬇ 导出":"⬇ Export",
+  "下载干净的独立报告 HTML(离线可看、可转发)":"Download a clean standalone report (offline, shareable)"
 }};
 function t(zh){ return (LANG!=="zh" && I18N[LANG] && I18N[LANG][zh]) || zh; }
 function applyI18n(){
@@ -225,7 +263,8 @@ function render(anim){track.classList.toggle("snap",!!anim);track.style.transfor
   var pos=document.getElementById("pos"); if(pos)pos.textContent=(i+1)+" / "+order.length;
   [].forEach.call(dotsEl.children,function(d,k){d.classList.toggle("active",k===i)});
   [].forEach.call(kpEl.children,function(li){li.classList.toggle("active",+li.dataset.idx===i)});}
-function go(n){i=Math.max(0,Math.min(order.length-1,n));dx=0;render(true)}
+function go(n){i=Math.max(0,Math.min(order.length-1,n));dx=0;render(true);
+  if(typeof closeMenu==="function")closeMenu();}   // 手机上导航后收起目录下拉
 
 function flash(el){el.classList.remove("flash");void el.offsetWidth;el.classList.add("flash");}
 function bodyEl(c){return c.el.querySelector(".body");}
@@ -326,7 +365,8 @@ function handle(ev){
         bar.querySelector(".rb-cancel").onclick=function(){bar.remove();};
       }}
     var li=[].find.call(kpEl.children,function(x){return +x.dataset.no===ev.id});
-    if(li){li.classList.add("filled");li.querySelector(".kp-con").textContent=ev.conclusion;}}
+    if(li){li.classList.add("filled");li.querySelector(".kp-con").textContent=ev.conclusion;}
+    document.getElementById("exportBtn").style.display="";}   // 有成品了,露出导出按钮
   else if(ev.type==="step_error"){var c=cards["s"+ev.id];
     if(c){c.el.classList.remove("active");c.el.classList.add("err");c.dot.classList.add("err");
       bodyEl(c).innerHTML='<p class="err-msg">⚠ 失败:'+esc(ev.msg)+'</p>'+
@@ -347,7 +387,7 @@ async function retryStep(id){
   bodyEl(c).innerHTML='<div class="placeholder">重试中…</div>'; flash(c.el);
   try{
     var resp=await fetch("/retry",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({topic:TOPIC,id:id,llm_key:LLMKEY,search_key:SEARCHKEY})});
+      body:JSON.stringify({topic:TOPIC,id:id,llm_key:LLMKEY,search_key:SEARCHKEY,pw:PW})});
     handle(await resp.json());
   }catch(e){setStatus("重试请求失败:"+e,false);
     bodyEl(c).innerHTML='<p class="err-msg">重试请求失败:'+esc(""+e)+'</p>'+
@@ -381,7 +421,7 @@ async function refineStep(id, feedback){
   bodyEl(c).innerHTML='<div class="placeholder">带反馈返工中…(定向补搜 + 重写)</div>'; flash(c.el);
   try{
     var resp=await fetch("/refine",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({topic:TOPIC,id:id,feedback:feedback,llm_key:LLMKEY,search_key:SEARCHKEY})});
+      body:JSON.stringify({topic:TOPIC,id:id,feedback:feedback,llm_key:LLMKEY,search_key:SEARCHKEY,pw:PW})});
     handle(await resp.json());
   }catch(e){setStatus("返工请求失败:"+e,false);
     bodyEl(c).innerHTML='<p class="err-msg">返工请求失败:'+esc(""+e)+'</p>'+
@@ -395,7 +435,7 @@ async function revertStep(id){
   bodyEl(c).innerHTML='<div class="placeholder">还原中…</div>'; flash(c.el);
   try{
     var resp=await fetch("/revert",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({topic:TOPIC,id:id})});
+      body:JSON.stringify({topic:TOPIC,id:id,pw:PW})});
     handle(await resp.json());
   }catch(e){setStatus("还原请求失败:"+e,false);}
 }
@@ -409,7 +449,7 @@ async function cascadeDownstream(ids){
     bodyEl(c).innerHTML='<div class="placeholder">连带刷新中…</div>'; flash(c.el);
     try{
       var resp=await fetch("/retry",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({topic:TOPIC,id:id,llm_key:LLMKEY,search_key:SEARCHKEY})});
+        body:JSON.stringify({topic:TOPIC,id:id,llm_key:LLMKEY,search_key:SEARCHKEY,pw:PW})});
       var ev=await resp.json(); if(ev)delete ev.downstream;   // 级联内部不再层层弹提示
       handle(ev);
     }catch(e){ setStatus("步骤 "+id+" 连带刷新失败:"+e+"(可单独点该页 ↻)",false); }
@@ -434,15 +474,21 @@ function pump(){
 var FINISHED=false;
 async function streamRun(resume){
   var resp=await fetch("/run",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({topic:TOPIC,detail:DETAIL,llm_key:LLMKEY,search_key:SEARCHKEY,resume:resume,deep:DEEP,lang:LANG})});
+    body:JSON.stringify({topic:TOPIC,detail:DETAIL,llm_key:LLMKEY,search_key:SEARCHKEY,resume:resume,deep:DEEP,lang:LANG,pw:PW})});
   var reader=resp.body.getReader(), dec=new TextDecoder(), buf="";
   while(true){var r=await reader.read(); if(r.done)break; buf+=dec.decode(r.value,{stream:true});
     var idx; while((idx=buf.indexOf("\n\n"))>=0){var chunk=buf.slice(0,idx);buf=buf.slice(idx+2);
-      if(chunk.indexOf("data: ")===0){try{var ev=JSON.parse(chunk.slice(6)); if(ev.type==="done")FINISHED=true; enqueue(ev);}catch(e){}}}}
+      if(chunk.indexOf("data: ")===0){try{var ev=JSON.parse(chunk.slice(6));
+        if(ev.type==="done"||ev.type==="error")FINISHED=true;   // 服务端明确收尾(含口令错/规划失败):别再自动续跑刷屏,留给手动 ↻
+        enqueue(ev);}catch(e){}}}}
 }
 async function start(){
   var topic=document.getElementById("topic").value.trim(); if(!topic)return;
   document.getElementById("goBtn").disabled=true;
+  PW=document.getElementById("accesspw").value;
+  if(AUTH && !PW){document.getElementById("goBtn").disabled=false;
+    document.getElementById("accesspw").focus();
+    alert(t("本站需口令才能使用"));return;}
   TOPIC=topic; DETAIL=document.getElementById("detail").value.trim();
   LLMKEY=document.getElementById("llmkey").value; SEARCHKEY=document.getElementById("searchkey").value;
   DEEP=document.getElementById("deepChk").checked;
@@ -481,10 +527,12 @@ document.getElementById("importFile").onchange=function(e){
   rd.readAsText(f); e.target.value="";   // 清空,允许重复选同一文件
 };
 async function importPlan(plan){
+  PW=document.getElementById("accesspw").value;    // 先取口令,再发 /import
+  if(AUTH && !PW){document.getElementById("accesspw").focus();alert(t("本站需口令才能使用"));return;}
   var btn=document.getElementById("importBtn"); btn.disabled=true; btn.textContent="导入中…";
   function rst(){btn.disabled=false; btn.textContent="⇪ 导入已有研究(上传 _plan.json)";}
   try{
-    var resp=await fetch("/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({plan:plan})});
+    var resp=await fetch("/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({plan:plan,pw:PW})});
     var ct=resp.headers.get("Content-Type")||"";
     if(!resp.ok || ct.indexOf("json")<0){            // 多半是后端没重启,/import 路由不存在,返回了 404 HTML
       alert("服务端没有 /import 接口(收到的不是 JSON)。\n八成是后端没重启——请重启 server.py,然后 /ping 应显示 2026-06-25-import。");
@@ -494,6 +542,7 @@ async function importPlan(plan){
     if(!r.ok){alert("导入失败:"+(r.msg||"未知")); rst(); return;}
     TOPIC=r.topic; DETAIL="";
     LLMKEY=document.getElementById("llmkey").value; SEARCHKEY=document.getElementById("searchkey").value;
+    PW=document.getElementById("accesspw").value;
     document.getElementById("cold").classList.add("gone");
     var app=document.getElementById("app"); app.hidden=false;
     requestAnimationFrame(function(){app.classList.add("lit")});
@@ -508,6 +557,24 @@ async function importPlan(plan){
   r.addEventListener("change",function(){LANG=r.value; applyI18n();});
 });
 applyI18n();   // 初次按默认语言刷一遍(中文=原样)
+
+// 问一下后端要不要口令:要 -> 冷启动页显出口令框(值本身不外传,只回一个布尔)
+fetch("/ping").then(function(r){return r.json();}).then(function(d){
+  AUTH=!!(d&&d.auth); if(AUTH)document.getElementById("pwWrap").style.display="";
+}).catch(function(){});
+
+// 手机版:目录悬浮下拉;点标题/要点后自动收起
+var leftPanel=document.querySelector(".left"), menuBtn=document.getElementById("menuBtn");
+function closeMenu(){ if(leftPanel)leftPanel.classList.remove("open"); }
+if(menuBtn)menuBtn.onclick=function(){ if(leftPanel)leftPanel.classList.toggle("open"); };
+
+// 导出:下载干净的独立报告 HTML(带口令走 query;浏览器据 Content-Disposition 触发下载)
+document.getElementById("exportBtn").onclick=function(){
+  if(!TOPIC)return;
+  var url="/download?topic="+encodeURIComponent(TOPIC)+(PW?("&pw="+encodeURIComponent(PW)):"");
+  window.location=url;
+};
+
 document.getElementById("goBtn").onclick=start;
 document.getElementById("resumeBtn").onclick=function(){
   if(!TOPIC){setStatus("还没开始,先点亮一个主题",false);return;}
