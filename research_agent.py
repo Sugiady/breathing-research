@@ -523,6 +523,23 @@ def _merge_steps(prev_steps, cur_steps):
         merged.append(m)
     return merged
 
+def _sanitize_deps(steps):
+    """把依赖图焊成严格 DAG:每步 depends_on 只保留"存在且 id 严格更小"的项,
+    剔除自依赖、前向依赖(指向更大 id)、指向不存在步骤的悬空依赖,并去重保序。
+    原则"依赖只指向更小 id"本是 Iter3 的 prompt 约定;这里把它从约定升为代码保证,
+    杜绝模型偶尔越界导致的隐性上下文缺口(执行仍按 id 升序,更小 id 的上游必已算完)。
+    就地修改并返回 steps。"""
+    ids = {s.get("id") for s in (steps or []) if isinstance(s, dict)}
+    for s in steps or []:
+        if not isinstance(s, dict):
+            continue
+        sid, kept, seen = s.get("id"), [], set()
+        for d in (s.get("depends_on") or []):
+            if d in ids and isinstance(sid, int) and isinstance(d, int) and d < sid and d not in seen:
+                seen.add(d); kept.append(d)
+        s["depends_on"] = kept
+    return steps
+
 def plan_iters(topic, llm_key=None, stream_iter1=True, detail="", probe="", lang="zh"):
     """生成器:逐轮规划。Iter1 可流式吐 reasoning(供"呼吸"),Iter2~4 直接返回。
     yield {type:thinking_delta|plan_iter|plan_final}。
@@ -562,6 +579,7 @@ def plan_iters(topic, llm_key=None, stream_iter1=True, detail="", probe="", lang
         cur.setdefault("deep_thinking", dt)            # 把 Iter1 的深度思考贯穿到底
         if not cur.get("steps"):                        # 终极兜底:任何时候都保证有步骤
             cur["steps"] = prev.get("steps", []) if prev else []
+        _sanitize_deps(cur["steps"])                    # 焊成严格 DAG:剔除自/前向/悬空依赖
         prev = cur
         yield {"type": "plan_iter", "k": k, "label": ITER_LABEL[k], "plan": cur}
     yield {"type": "plan_final", "plan": prev}
@@ -829,6 +847,7 @@ def import_plan(plan_obj):
     steps = plan.get("steps")
     if not (isinstance(steps, list) and steps):
         raise ValueError("JSON 里缺少 plan.steps —— 似乎不是本工具导出的研究文件")
+    _sanitize_deps(steps)      # 导入的旧文件也焊一遍 DAG,防历史/手改文件带前向或悬空依赖
     topic = re.sub(r'[\\/:*?"<>|]', "_", (plan_obj.get("topic") or "导入的研究").strip()) or "导入的研究"
     plan_obj["topic"] = topic
     json.dump(plan_obj, open(os.path.join(HERE, f"{topic}_plan.json"), "w", encoding="utf-8"),
