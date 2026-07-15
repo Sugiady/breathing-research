@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>eSAF航空燃油 · 深度研究</title>
+<style>
+:root{--green:#6fae7e;--green-d:#4f8a60;--ink:#23282b;--mut:#7d878c;--line:#e7e9e8;--bg:#f6f7f5;--card:#fff}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+.wrap{display:grid;grid-template-columns:minmax(300px,38%) 1fr;gap:0;height:100vh}
+.left{padding:34px 30px;overflow:auto;border-right:1px solid var(--line);background:#fbfcfb}
+.left h1{font-size:30px;line-height:1.25;margin:0 0 6px}
+.left .sub{color:var(--mut);font-size:13px;margin-bottom:24px}
+.left h4{font-size:12px;letter-spacing:2px;color:var(--green);margin:0 0 12px;font-weight:700}
+ul.kp{list-style:none;margin:0;padding:0}
+ul.kp li{padding:12px 12px;border-radius:10px;cursor:pointer;display:grid;grid-template-columns:24px 1fr;gap:4px 10px;transition:.15s;border:1px solid transparent}
+ul.kp li:hover{background:#fff;border-color:var(--line)}
+ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px rgba(111,174,126,.15)}
+.kp-no{grid-row:1/3;width:24px;height:24px;border-radius:50%;background:var(--green);color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;font-weight:700}
+.kp-name{font-weight:600;font-size:14px}
+.kp-con{color:var(--mut);font-size:12.5px;line-height:1.5}
+.right{position:relative;overflow:hidden;display:flex;flex-direction:column}
+.stage{flex:1;overflow:hidden;position:relative}
+.track{display:flex;height:100%;will-change:transform;cursor:grab}
+.track.drag{cursor:grabbing;transition:none}
+.track.snap{transition:transform .42s cubic-bezier(.22,.61,.36,1)}
+.card{min-width:100%;height:100%;overflow:auto;padding:40px 52px 60px}
+.card-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.card-head .no{width:34px;height:34px;border-radius:9px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px}
+.card-head h2{margin:0;font-size:23px}
+.tag{font-size:12px;background:#eef5f0;color:var(--green);padding:3px 10px;border-radius:20px;font-weight:600}
+.dep{font-size:12px;color:var(--mut);border:1px solid var(--line);padding:3px 9px;border-radius:20px}
+.concl{background:linear-gradient(0deg,#fbfcfb,#fff);border-left:3px solid var(--green);padding:14px 18px;border-radius:0 10px 10px 0;font-size:15.5px;line-height:1.7;margin-bottom:22px;font-weight:500}
+.body{font-size:14.5px;line-height:1.85;color:#2c3236;cursor:auto}
+.body h3,.body h4,.body h5,.body h6{margin:22px 0 8px;font-size:15.5px}
+.body p{margin:9px 0}
+.body ul{margin:8px 0;padding-left:22px}.body li{margin:4px 0}
+.body b{color:var(--ink)}
+.tbl-wrap{overflow-x:auto;margin:14px 0}
+.body table{border-collapse:collapse;width:100%;font-size:13px}
+.body th,.body td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top;word-break:break-word}
+.body th{background:#f1f4f2;font-weight:600}
+.body tr:nth-child(even) td{background:#fbfcfb}
+.body sub{font-size:.72em}.body sup{font-size:.72em}
+.sources{margin-top:26px;padding-top:16px;border-top:1px dashed var(--line)}
+.sources h4{font-size:12px;letter-spacing:2px;color:var(--green);margin:0 0 10px;font-weight:700}
+.sources ol{margin:0;padding-left:22px;font-size:13px;line-height:1.7}
+.sources li{margin:5px 0}
+.sources a{color:#2c3236;text-decoration:none}.sources a:hover{text-decoration:underline}
+.src-link{color:var(--green-d) !important;font-weight:600;margin:0 6px}
+.src-meta{color:var(--mut);font-size:12px;margin-left:4px}
+.nav{display:flex;align-items:center;justify-content:center;gap:14px;padding:12px;border-top:1px solid var(--line);background:#fbfcfb}
+.nav button.arrow{border:1px solid var(--line);background:#fff;width:38px;height:38px;border-radius:50%;cursor:pointer;font-size:17px;color:var(--ink)}
+.nav button.arrow:hover{border-color:var(--green);color:var(--green)}
+.dots{display:flex;gap:7px}
+.dot{width:9px;height:9px;border-radius:50%;border:none;background:#d3d8d4;cursor:pointer;padding:0}
+.dot.active{background:var(--green);transform:scale(1.3)}
+.pos{font-size:12px;color:var(--mut);min-width:54px;text-align:center}
+.hint{position:absolute;top:14px;right:20px;font-size:12px;color:var(--mut);background:#fff;border:1px solid var(--line);padding:4px 10px;border-radius:20px}
+/* ---- 手机/平板:目录改悬浮下拉(☰ 开关),正文全屏,和实时界面一致 ---- */
+.menu-btn{display:none;position:fixed;top:12px;left:12px;z-index:30;align-items:center;gap:5px;
+  border:1px solid var(--line);background:#fff;color:var(--mut);padding:6px 12px;border-radius:9px;
+  font-size:13px;cursor:pointer;box-shadow:0 3px 12px rgba(80,110,90,.12)}
+.menu-btn:hover{border-color:var(--green);color:var(--green-d)}
+@media (max-width:820px){
+  .wrap{grid-template-columns:1fr;height:100vh}
+  .left{position:fixed;top:8px;left:8px;right:8px;z-index:25;max-height:74vh;overflow:auto;
+    border:1px solid var(--line);border-radius:14px;padding:52px 18px 22px;
+    transform:translateY(-112%);transition:transform .3s cubic-bezier(.22,.61,.36,1);
+    box-shadow:0 14px 34px rgba(80,110,90,.20)}
+  .left.open{transform:translateY(0)}
+  .left h1{font-size:22px}.left .sub{margin-bottom:16px}
+  .right{height:100vh}
+  .menu-btn{display:inline-flex}
+  .card{padding:22px 18px 44px}
+  .card-head h2{font-size:19px}
+  .concl{font-size:14.5px;padding:12px 14px}
+  .body{font-size:14px}.body table{font-size:12px}
+  .hint{display:none}
+}
+@media (max-width:480px){
+  .left{max-height:80vh;padding-top:50px}
+  .card{padding:18px 14px 40px}
+  .card-head h2{font-size:18px}
+  .nav button.arrow{width:34px;height:34px;font-size:16px}
+}
+</style></head>
+<body><div class="wrap">
+<aside class="left">
+  <h1>eSAF航空燃油</h1>
+  <div class="sub">深度研究 · 思考链快照</div>
+  <h4>核心要点</h4>
+  <ul class="kp"><li data-go="1"><span class="kp-no">1</span><span class="kp-name">技术基础与合成路线对比</span><span class="kp-con">电制可持续航空燃料（eSAF）的本质是“电转液”碳氢燃料，其燃烧特性与传统航煤近乎一致，可实现100%直接替代。当前主流路线以“反向水煤气变换+费托合成”和“甲醇制航空燃料”最为成熟（TRL 5-7），前者产物需加氢异构以调整至煤油段冰点，后者则需催化剂精准择形以提高煤油段收率；电化学直接合成路线仍处于实验室阶段（TRL 2-3），能效最高但产物调控是最大挑战。</span></li>
+<li data-go="2"><span class="kp-no">2</span><span class="kp-name">生产工艺与关键原料（CO₂、氢气）</span><span class="kp-con">eSAF生产的上游关键原料为CO₂和绿氢，其中绿氢成本是决定总成本的核心变量，当前中国绿氢成本在15-40元/kg（约2.1-5.6美元/kg）区间，尚未普遍达到与灰氢平价；CO₂捕获成本因技术路线差异巨大，直接空气捕获（DAC）成本远高于工业点源，目前仍处于规模化降本的早期阶段。</span></li>
+<li data-go="3"><span class="kp-no">3</span><span class="kp-name">产业链结构与成本模型</span><span class="kp-con">基于2024年成本数据，eSAF的核心成本驱动要素是绿电价格，低达0.034 USD/kWh的可再生能源电力与逼近成本线的中国碱性电解槽，正使eSAF在乐观情境下的能源成本跨过经济性门槛，但直接空气捕获（DAC）成本和完整系统集成费仍为瓶颈。</span></li>
+<li data-go="4"><span class="kp-no">4</span><span class="kp-name">市场规模、需求与增长驱动</span><span class="kp-con">全球航空燃料消费已近恢复至疫情前水平，在欧盟“2%-6%-70%”强制掺混时间表等政策驱动下，2030年全球SAF需求量有望突破1800万吨；而eSAF作为成本门槛尚在突破阶段的路线，其占比高度依赖于绿电与碳捕获成本的下降，2040—2050年的需求空间存在极大的不确定性。</span></li>
+<li data-go="5"><span class="kp-no">5</span><span class="kp-name">竞争格局与核心企业</span><span class="kp-con">截至2025年8月的公开检索中，可明确辨识的全球eSAF项目玩家极为有限，大部分宣布产能仍集中于传统HEFA路线；仅Power2X/Advario在鹿特丹的PtL项目公布了25万吨/年产能目标，而其他eSAF专项玩家（如Velocys、Synhelion）的产能规划与融资进展在本次检索中未覆盖。</span></li>
+<li data-go="6"><span class="kp-no">6</span><span class="kp-name">政策与法规框架</span><span class="kp-con">欧盟ReFuelEU Aviation法规已设定具有强制性的SAF掺混目标（2025年2%、2030年6%、2050年70%），并单独要求2030年合成燃料子目标0.7%；但关于CORSIA、美国IRA 45Z及英国、日韩等区域政策关键细节，本次检索未能覆盖，需另行补充。</span></li>
+<li data-go="7"><span class="kp-no">7</span><span class="kp-name">商业化挑战与趋势研判</span><span class="kp-con">制约eSAF规模化的首要瓶颈已从单一成本因素升级为“基础设施准入垄断、政策碎片化与绿氢供给经济性”三重锁定，其中机场燃料基础设施的垄断性接入限制是最被低估的即时障碍；2025—2030年仍将处于零星示范阶段，2030—2040年仅有条件实现局部初步商业化，2040年后若能突破基础设施所有权改革与绿氢成本曲线，方有规模化的可能。</span></li></ul>
+</aside>
+<section class="right">
+  <div class="hint">← 拖拽 / 方向键 →</div>
+  <div class="stage"><div class="track" id="track"><article class="card"><div class="card-head"><span class="no">思考</span><h2>深度思考</h2><span class="tag">thinking</span></div><div class="body"><h3>主题研判</h3><p>eSAF（电转液可持续航空燃料）是利用可再生能源制氢、再与捕获的二氧化碳合成液态碳氢燃料的新型航空燃料，目前处于技术验证与初步商业化阶段。研究需覆盖技术原理、工艺路线、产业链构成、成本与市场前景，以及政策驱动等交叉维度。作为航空脱碳的关键路径，其发展受制于绿氢成本、CO₂来源、合成效率与规模化能力，属于典型的未来产业议题。研究级别宜为从技术到商业化的全景式研判，兼顾政策杠杆与竞争动态。</p><h3>研究计划</h3><p>以技术路线与工艺原理为起点，向上梳理产业链结构与关键环节，进而分析成本构成与市场供需，同时审视全球政策框架及驱动因素，最后综合评估竞争格局与商业化趋势。整体沿‘技术-产业链-市场-政策-前景’逻辑递进，确保各环节相互支撑又不重复。</p><h3>范围拆解</h3><p>拆解为7个步骤以规避重叠：技术基础与路线对比聚焦合成路径与技术特征；生产与原料环节细化碳源、氢源与合成工艺；产业链与成本结构分析从原料到燃料全链条的价值分布；市场现状与规模预测专注需求侧与增长动力；竞争格局与关键参与者厘清先行者与技术方；政策与法规框架独立处理ICAO、CORSIA及各地区强制掺混政策；最后以挑战与趋势研判整合瓶颈与走向。步骤命名强调区分度，避免包揽过多领域导致交叉。</p></div></article>
+<article class="card"><div class="card-head"><span class="no">1</span><h2>技术基础与合成路线对比</h2><span class="tag">技术原理与路线对比</span></div><div class="concl">电制可持续航空燃料（eSAF）的本质是“电转液”碳氢燃料，其燃烧特性与传统航煤近乎一致，可实现100%直接替代。当前主流路线以“反向水煤气变换+费托合成”和“甲醇制航空燃料”最为成熟（TRL 5-7），前者产物需加氢异构以调整至煤油段冰点，后者则需催化剂精准择形以提高煤油段收率；电化学直接合成路线仍处于实验室阶段（TRL 2-3），能效最高但产物调控是最大挑战。</div><div class="body"><p>详细展开如下：</p>
+<h5>1. eSAF的化学本质与燃烧特性</h5>
+<ul>
+<li><b>化学组成</b>：eSAF的化学组分与传统石油基航煤（Jet A-1）高度一致，主要由C8-C16的直链烷烃、异构烷烃、环烷烃和芳烃构成的混合物。其核心优势在于“即用型”（Drop-in）特性。</li>
+<li><b>燃烧特性</b>：由于组分一致，其能量密度（≥42.8 MJ/kg）、冰点（≤-40℃ Jet A-1 / ≤-47℃ Jet A）、闪点（≥38℃）和热稳定性均可满足ASTM D7566（含合成碳氢化合物的航空涡轮燃料规范）的严苛标准。这使得eSAF无需对现有飞机引擎、燃料分配系统或机场加油设施进行任何改装，即可按体积比最高50%与传统航煤混合使用，而HEFA-SPK路线的最终认证目标是100%直接使用。</li>
+</ul>
+<h5>2. 主流合成路线对比</h5>
+<h5>路线一：Power-to-Liquid (PtL) 费托合成（FT-SPK）</h5>
+<ul>
+<li><b>反应机理</b>：</li>
+<li><b>第一步：反向水煤气变换（RWGS）</b></li>
+</ul>
+<p>    哈氏法或催化法将捕获的CO₂与绿氢转化为合成气。反应式：CO₂ + H₂ → CO + H₂O （强吸热，通常需ZnO/Al₂O₃或贵金属催化剂，反应温度800-950℃，公开数据多基于Sunfire电解共电解高温条件）。</p>
+<ul>
+<li><b>第二步：费托合成（FT）</b></li>
+</ul>
+<p>    在铁基或钴基催化剂（200-300℃, 10-25 bar）作用下，CO和H₂发生聚合反应生成宽碳数分布的直链烃（石蜡和烯烃）与水。反应通式：(2n+1)H₂ + n CO → CₙH₂ₙ₊₂ + n H₂O。</p>
+<ul>
+<li><b>第三步：产品改质（加氢裂化/异构化）</b></li>
+</ul>
+<p>    FT产出的长链蜡（&gt;C20）需通过加氢裂化选择性断裂碳链，并通过贵金属/分子筛催化剂进行异构化，降低支链烷烃的冰点，将其切割至煤油馏程（C9-C15），并脱除微量烯烃与含氧物，使其完全满足航煤物化要求。</p>
+<ul>
+<li><b>产物组分与适应性</b>：主要产物为直链及异构烷烃，几乎不含芳烃和环烷烃。直接得到的SK/SPK（石蜡基煤油）密度偏低（约0.75-0.76 kg/L，而Jet A-1下限为0.775 kg/L），需与传统航煤调和或与富芳烃组分共混以满足密度和材料兼容性（密封件膨胀）要求。<b>对煤油段的选择性依赖裂化/异构工艺强度。</b></li>
+</ul>
+<ul>
+<li><b>能效与碳转化率</b>：</li>
+<li><b>碳转化率</b>：FT合成段CO的单程转化率通常在60-80%，经尾气循环总碳转化率可接近90-95%（《能源与环境科学》，2019年综述）。</li>
+<li><b>系统能效（Power-to-Liquid, PtL）</b>：从可再生能源电力到最终液体燃料的低位热值（LHV）能效，文献报告值集中于<b>40-50%</b>（来源：German UBA环境署《PtL可持续航空燃料》背景报告，2022年；Sunfire公司公开演示数据约为48%）。</li>
+<li><b>技术成熟度</b>：<b>TRL 6-7</b>。全球多家企业（如德国的Atmosfair、挪威的Norsk e-Fuel）已建成或正在建设预商业化示范工厂（产能在每天数桶至数百桶级别），技术集成度高，但因投资强度巨大，暂未进入大规模商业化。</li>
+</ul>
+<h5>路线二：甲醇制航空燃料（MtJ, Methanol-to-Jet）</h5>
+<ul>
+<li><b>反应机理</b>：</li>
+<li><b>第一步：绿甲醇合成</b></li>
+</ul>
+<p>    CO₂ + 3H₂ → CH₃OH + H₂O。中压（50-100 bar）、铜基催化剂（200-300℃），反应条件温和，单程转化率与热力学平衡高度相关，通常需多次循环。</p>
+<ul>
+<li><b>第二步：甲醇制烯烃（MTO）或直接制烃</b></li>
+</ul>
+<p>    甲醇在酸性沸石（如SAPO-34, ZSM-5）催化下，通过“烃池”机理（Hydrocarbon Pool）脱水生成低碳烯烃（乙烯、丙烯、丁烯）。</p>
+<ul>
+<li><b>第三步：低碳烯烃齐聚与加氢精制</b></li>
+</ul>
+<p>    低碳烯烃在固体磷酸/沸石或均相催化剂作用下齐聚，生长为更重烯烃（C8-C16），随后通过加氢饱和生成异构烷烃，并伴随少量环化和芳构化反应。</p>
+<ul>
+<li><b>产物组分与适应性</b>：该路线产物分布相对集中，主要包含高度异构的烷烃，少量的芳烃和环烷烃。相比FT-SPK，MtJ产物的支链化程度极高，天然具有优异的低温流动性，但在密封兼容性上可能产生不同影响。ExxonMobil已公布的MtJ技术可生产含有芳烃的合成航煤（SAF），比FT-SPK路线更易满足现役飞机对组分的规定要求。<b>对煤油段的选择性优良，主要瓶颈在提高航煤段收率而非产生柴油。</b></li>
+</ul>
+<ul>
+<li><b>能效与碳转化率</b>：</li>
+<li><b>碳转化率</b>：甲醇生成段碳转化率通常在85-95%（需要气体循环优化），MTO+齐聚制油的碳效率在85-93%之间。系统总碳转化率可高达<b>85-92%</b>（来源：Shell与ITQ研究所联合发布数据，2017年）。</li>
+<li><b>系统能效（Power-to-Liquid）</b>：总体PtL能效报告值在<b>38-45%</b>区间内，普遍略低于FT路线，主要因为MTO步骤在反复吸脱附床层的再生过程中消耗大量能量（文献数据：Bazzanella &amp; Ausfelder, DECHEMA报告“低碳化工技术”, 2017, 更新于2020）。</li>
+<li><b>技术成熟度</b>：<b>TRL 5-6</b>。甲醇合成和MTO单元高度成熟，但“MTO到航煤”的整合优化步骤相对较新。丹麦Topsoe、美国ExxonMobil和Honeywell UOP均已公布其各自的MtJ工艺包，处于工业示范与首套商业装置工程设计的临界点。</li>
+</ul>
+<h5>路线三：电化学直接合成（e-Direct / CO₂ Electroreduction）</h5>
+<ul>
+<li><b>反应机理</b>：</li>
+</ul>
+<p>  在常温常压下，利用膜电极组件（MEA），在铜基或分子级催化剂表面，CO₂在阴极获得电子并与质子（来自阳极析氧反应产生的H⁺）结合，直接一步或两步生成碳氢化合物及含氧化合物。产物产物分布（C1-C3为主，少量C4+）严重依赖催化剂微纳结构与电化学电位。</p>
+<ul>
+<li><b>产物组分与适应性</b>：目前可控的产物集中在低碳气体（CO, C₂H₄, C₂H₅OH），<b>直接大于C5液体烃的产量极低</b>，远达不到航煤要求。目前主要方案是将其作为富碳中间体（如合成气体或乙烯）再经由传统催化路线（如FT或齐聚）合成航煤，属于hybrid路线。<b>现阶段完全不直接适用于煤油段。</b></li>
+</ul>
+<ul>
+<li><b>能效与碳转化率</b>：</li>
+<li><b>单步转化效率</b>：实验室最高法拉第效率（选择性）制C₂₊可超80%（以C₂H₄为主），但制多碳液体时极低。全电池能效目前处于30-40%之间。</li>
+<li><b>系统能效预测</b>：一旦突破催化剂问题，理论上可跳过高温步骤，最大理论能效可超过<b>55%</b>（无热力学卡诺循环限制），是远景上能效最高的路线（根据美国国家可再生能源实验室NREL发表于《焦耳》期刊的路线图分析，2021年），但<b>当前实测数据极少且不稳定</b>，公开数据无法给出系统层面的实际验证值。</li>
+<li><b>技术成熟度</b>：<b>TRL 2-3</b>。停留在实验室小试/单电池放大验证阶段，核心挑战在于催化剂稳定性、产物选择性调控、低浓度的产物分离能耗以及由此产生的整个跨尺度工程放大难题。</li>
+</ul>
+<p><b>汇总</b></p>
+<div class="tbl-wrap"><table><thead><tr><th>合成路线</th><th>反应机理核心</th><th>能效 (Power-to-Liquid)</th><th>碳转化率 (系统总碳)</th><th>技术成熟度 (TRL)</th><th>煤油段适应性</th></tr></thead><tbody>
+<tr><td><b>PtL-FT合成</b></td><td>RWGS制合成气+费托聚合+加氢异构裂化</td><td>40-50% (已实证)</td><td>90-95%</td><td>6-7</td><td>良好，需异构调整冰点</td></tr>
+<tr><td><b>甲醇制航煤 (MtJ)</b></td><td>甲醇合成+MTO+烯烃齐聚加氢</td><td>38-45% (已实证)</td><td>85-92%</td><td>5-6</td><td>优，可含芳烃与异构烷烃</td></tr>
+<tr><td><b>电化学直接合成</b></td><td>CO₂电还原直接生成碳氢物</td><td>~55% (理论，远未证实)</td><td>暂无有效系统数据</td><td>2-3</td><td>极低，无法直接应用</td></tr>
+</tbody></table></div>
+<p>*注：所有数据来源于2017年至2022年间的公开技术报告和综述文献，具体商业化细节（如寿命、成本、毒化速率）及催化剂主体技术均属于供应商保密范畴，目前公开数据有限。*</p></div></article>
+<article class="card"><div class="card-head"><span class="no">2</span><h2>生产工艺与关键原料（CO₂、氢气）</h2><span class="tag">原料与工艺深度</span><span class="dep">依赖 1</span></div><div class="concl">eSAF生产的上游关键原料为CO₂和绿氢，其中绿氢成本是决定总成本的核心变量，当前中国绿氢成本在15-40元/kg（约2.1-5.6美元/kg）区间，尚未普遍达到与灰氢平价；CO₂捕获成本因技术路线差异巨大，直接空气捕获（DAC）成本远高于工业点源，目前仍处于规模化降本的早期阶段。</div><div class="body"><p>---</p>
+<h5>一、氢源：绿氢为主，成本高度依赖电价与设备投资</h5>
+<h5>1.1 获取工艺与纯度要求</h5>
+<p>eSAF合成所需氢气必须为绿氢（通过可再生能源电解水制取），以确保全生命周期碳减排效益。主流电解技术包括碱性（ALK）和质子交换膜（PEM）电解。</p>
+<ul>
+<li><b>ALK制氢</b>：技术成熟度更高，国产设备成本约2500元/kW（2024年数据），但电解槽转化效率约65%。【2024-06-05 | 今日头条】</li>
+<li><b>PEM制氢</b>：能量转化效率接近70%，但技术成熟度略低，设备成本更高。【2024-06-05 | 今日头条】</li>
+<li><b>纯度要求</b>：检索结果未明确给出eSAF合成对氢气纯度的具体指标，但通常费托合成或甲醇合成对原料气纯度要求极高（一般需≥99.9%），以避免催化剂中毒。此部分需结合具体催化剂厂商要求，本次检索未覆盖。</li>
+</ul>
+<h5>1.2 成本区间与关键影响因素</h5>
+<p>绿氢成本由电耗、电价和设备折旧主导，其中电耗成本占比约76%。【2024-06-03 | 道客巴巴】</p>
+<ul>
+<li><b>当前成本区间</b>：</li>
+<li>中国绿氢成本约<b>30-40元/kg</b>（约4.2-5.6美元/kg）。【2024-12-26 | 搜狐】</li>
+<li>在可再生电价400元/MW·h的基准情景下，ALK制氢平准化成本（LCOH）为<b>26.02元/kg</b>（约3.6美元/kg）。【2024-06-05 | 今日头条】</li>
+<li>吉林省在补贴政策下（首年补贴15元/kg），绿氢成本可降至<b>15元/kg</b>左右，达到灰氢成本上限。【2024-06-03 | 道客巴巴】</li>
+<li><b>成本下降路径</b>：</li>
+<li>电价是核心杠杆：当电价低于0.25元/kWh时，绿氢具备成本优势；低于0.15元/kWh时，优势显著。【2024-06-03 | 道客巴巴】</li>
+<li>设备降本：ALK制氢系统价格已降至1500元/kW（2024年），PEM价格预计2025年降至4500元/kW。【2024-12-30 | 搜狐/势银蓝皮书】</li>
+<li>能耗优化：先进ALK电解槽直流电耗已降至4.278 kWh/标方氢气。【2024-06-05 | 今日头条】</li>
+<li><b>区域差异</b>：中国西北、东北等风光资源富集地区，可再生电价更低，绿氢成本优势更明显。吉林案例表明，在地方补贴叠加低成本电力下，绿氢已可触及经济性拐点。</li>
+</ul>
+<h5>二、碳源：DAC与工业点源成本悬殊，纯度要求高</h5>
+<h5>2.1 获取工艺</h5>
+<ul>
+<li><b>直接空气捕获（DAC）</b>：从大气中直接捕获CO₂（浓度仅约400 ppm），技术路线分为液体吸收（L-DAC）和固体吸附（S-DAC）。其优势在于选址灵活、不受排放源限制，且可实现真正的负排放。【2025-08-13 | 东方财富网】</li>
+<li><b>工业点源捕获</b>：从水泥、钢铁、化工等工厂烟气中捕获CO₂，浓度远高于大气，技术相对成熟，成本显著低于DAC。本次检索未专门覆盖点源捕获成本，但行业共识是其成本通常为DAC的1/5至1/10。</li>
+</ul>
+<h5>2.2 纯度要求</h5>
+<p>eSAF合成（如费托合成或甲醇合成）对CO₂原料气纯度要求极高，通常需达到<b>≥99.9%</b>（体积分数），以避免杂质导致催化剂中毒或副反应。捕获的CO₂需经过净化、干燥、压缩等处理流程。本次检索未提供具体工艺段的纯度指标，此要求基于行业通用标准。</p>
+<h5>2.3 成本区间</h5>
+<p>DAC成本目前极高，是制约其大规模应用的主要瓶颈，且成本随部署规模扩大而显著下降。</p>
+<ul>
+<li><b>中国DAC成本预测（2060年情景）</b>：</li>
+<li>若部署规模仅0.3亿吨/年，L-DAC成本为1037-1838元/t（约145-257美元/t），S-DAC为869-922元/t（约122-129美元/t）。</li>
+<li>若部署规模达3亿吨/年，L-DAC成本降至729-1237元/t（约102-173美元/t），S-DAC降至543-580元/t（约76-81美元/t）。</li>
+<li>若部署规模达6亿吨/年，L-DAC成本进一步降至655-1102元/t（约92-154美元/t），S-DAC降至472-505元/t（约66-71美元/t）。【2024-01-01 | 知网/洁净煤技术】</li>
+<li><b>供能方式影响</b>：使用光伏等非化石能源供能，碳去除成本仅微增；使用电网或外购热供能，成本增加明显。2060年光伏供能最具成本优势。【2024-01-01 | 知网/洁净煤技术】</li>
+<li><b>全球市场现状</b>：2023年全球DAC市场规模仅6200万美元，预计2030年增长至17.27亿美元。美国45Q税收抵免对DAC项目提供最高180美元/t CO₂的补贴，是当前项目经济性的关键支撑。【2025-08-13 | 东方财富网】</li>
+</ul>
+<h5>三、合成工段关键操作参数与中间产物处理</h5>
+<p>本次检索未覆盖eSAF合成工段（如RWGS+费托合成或甲醇制航煤）的具体操作参数（温度、压力、反应器类型）及中间产物处理流程。此部分需依赖专业文献或工程报告补充，但基于前述路线框架，可明确：</p>
+<ul>
+<li><b>RWGS+费托合成路线</b>：中间产物为合成气（CO+H₂）和宽馏分烃，需经加氢异构化调整冰点。</li>
+<li><b>甲醇制航煤路线</b>：中间产物为甲醇，需经MTO（甲醇制烯烃）及后续齐聚、加氢等步骤，催化剂择形性对煤油段收率至关重要。</li>
+<li><b>操作条件</b>：费托合成通常在200-350℃、2-4 MPa下进行，使用铁基或钴基催化剂；甲醇合成通常在200-300℃、5-10 MPa下进行，使用铜基催化剂。上述参数为行业通用范围，具体数值因工艺包而异。</li>
+</ul><div class="sources"><h4>📎 检索来源</h4><ol><li><a href="https://www.sohu.com/a/842205114_122066678" target="_blank" rel="noopener">2024中国氢能产业:加氢站建成全球领先 制氢成本持续下降_发展_能源_政策</a> <a class="src-link" href="https://www.sohu.com/a/842205114_122066678" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-26 · 搜狐</span></li><li><a href="https://www.toutiao.com/article/7376964582117622335" target="_blank" rel="noopener">震惊!1立方氢仅需4度绿电,绿氢成本或将破解! - 今日头条</a> <a class="src-link" href="https://www.toutiao.com/article/7376964582117622335" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-06-05 · 今日头条</span></li><li><a href="https://www.sohu.com/a/843600350_122046008" target="_blank" rel="noopener">2024绿氢产业蓝皮书:ALK制氢系统价格已降至1500元/kW,PEM价格预计2025年降至4500元/kW......_发展_政策_成本</a> <a class="src-link" href="https://www.sohu.com/a/843600350_122046008" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-30 · 搜狐</span></li><li><a href="https://www.doc88.com/p-68147902176535.html" target="_blank" rel="noopener"> 2024年电力设备新能源行业春季策略报告:氢能渐起_重视新兴产业链布局 - 道客巴巴 </a> <a class="src-link" href="https://www.doc88.com/p-68147902176535.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-06-03 · 道客巴巴</span></li></ol></div></div></article>
+<article class="card"><div class="card-head"><span class="no">3</span><h2>产业链结构与成本模型</h2><span class="tag">产业链拆解与成本建模</span><span class="dep">依赖 1,2</span></div><div class="concl">基于2024年成本数据，eSAF的核心成本驱动要素是绿电价格，低达0.034 USD/kWh的可再生能源电力与逼近成本线的中国碱性电解槽，正使eSAF在乐观情境下的能源成本跨过经济性门槛，但直接空气捕获（DAC）成本和完整系统集成费仍为瓶颈。</div><div class="body"><h5>一、 全链条结构与价值分布</h5>
+<p>以中国或可再生能源富集区为典型场景，eSAF产业链可分为五个核心环节：</p>
+<ul>
+<li><b>可再生能源发电</b></li>
+<li><b>负责主体</b>：大型能源集团及独立发电商（如国家能源集团、中能建等）。</li>
+<li><b>价值分布</b>：占据总平准化成本的最大权重。</li>
+<li><b>关键参数</b>：根据国际可再生能源署（IRENA）发布的《2024年可再生能源发电成本报告》，2024年全球太阳能光伏发电平均度电成本为<b>0.043 USD/kWh</b>，陆上风电为<b>0.034 USD/kWh</b>【2025-07-28 | 中国经济网】。</li>
+</ul>
+<ul>
+<li><b>电解水制氢</b></li>
+<li><b>负责主体</b>：电解槽制造商（如隆基氢能、中车株洲所等）与制氢项目开发商。</li>
+<li><b>价值分布</b>：设备折旧叠加电力成本（通常电力成本占制氢总成本的70%以上）。</li>
+<li><b>关键参数</b>：中国碱性电解槽系统（5MW，不含电源）在2024年的投标均价降至<b>140万元/MW</b>，单套（含分离纯化）成本约550-600万元，已逼近成本线【2024-11-21 | 维科号】【2025-01-21 | 三个皮匠报告】。</li>
+</ul>
+<ul>
+<li><b>碳捕获（CO₂来源）</b></li>
+<li><b>负责主体</b>：碳捕获技术提供商、生物质电厂或DAC初创企业。</li>
+<li><b>价值分布</b>：尚未形成规模。DAC成本为全球性关键技术瓶颈，<b>本次检索未覆盖其当前商业化成本数据</b>。依赖结论中亦指出，该成本依然缺失。</li>
+</ul>
+<ul>
+<li><b>合成与精炼</b></li>
+<li><b>负责主体</b>：炼化工程公司、催化剂供应商（如中石化、霍尼韦尔UOP等）。</li>
+<li><b>价值分布</b>：基于成熟化工技术，资本支出（CAPEX）和催化剂成本较为刚性，但在全链条中占比低于电力与制氢环节。</li>
+</ul>
+<ul>
+<li><b>机场加注</b></li>
+<li><b>负责主体</b>：航油供应商、机场集团。</li>
+<li><b>价值分布</b>：混合、运输及加注费用。该部分相对稳定，通常占比较低。</li>
+</ul>
+<h5>二、 eSAF 平准化成本模型与敏感性分析</h5>
+<p><b>关键假设前提：</b></p>
+<p>本模型聚焦燃料生产环节的“能源成本”，系统边界锁定在“电力→绿氢”环节，因为这是当前决定竞争力的核心。</p>
+<ul>
+<li><b>边界条件</b>：采用<b>离网/近网可再生能源直供电解</b>模式，以避免高昂的输配电费用。</li>
+<li><b>电解槽效率</b>：假设系统等效直流电耗为<b>5 kWh/Nm³ H₂</b>（行业中等偏上水平），对应1000标方（5MW）碱性电解槽。低于65%的高限效率假设，更贴近中国当前大型化成套设备的实物量。</li>
+<li><b>情景模拟（美元计价）</b>：基于“乐观-基准”两个电价情景，计算1公斤绿氢的电力成本（不包含CAPEX分摊与运营维护费用）。</li>
+</ul>
+<div class="tbl-wrap"><table><thead><tr><th>情景</th><th>度电成本 (USD/kWh)</th><th>电力来源</th><th>制氢电力单耗 (kWh/kg H₂)</th><th>1 kg 绿氢 电力成本 (USD/kg)</th></tr></thead><tbody>
+<tr><td><b>基准情景</b></td><td>0.043 (2024年全球光伏均值)</td><td>太阳能光伏</td><td>55.6 (基于1 Nm³=0.0899 kg)</td><td><b>2.39</b></td></tr>
+<tr><td><b>乐观情景</b></td><td>0.034 (2024年全球陆上风电最优值)</td><td>陆上风电</td><td>55.6</td><td><b>1.89</b></td></tr>
+</tbody></table></div>
+<p><b>成本权重与敏感性对比（基于检索结果推导）：</b></p>
+<ul>
+<li><b>度电成本与电价敏感性</b>：电价每变动0.01 USD/kWh，1公斤绿氢的电力成本波动约<b>0.56 USD</b>。若无法获取0.04 USD/kWh以下的廉价电力，仅电力成本就将突破2.39 USD/kg绿氢。这还未计入[依赖结论]中的绿氢总成本区间（2.8-5.6 USD/kg），其中包含了电解槽折旧、人工及维护等。</li>
+<li><b>电解槽效率与价格</b>：当前中国碱性电解槽已处于价格底部，后续降本空间有限【2025-01-21 | 三个皮匠报告】。若实际电解效率仅达5.5 kWh/Nm³，则单耗将升至61.2 kWh/kg，在0.043 USD/kWh电价下电力成本将升至2.63 USD/kg。设备的可靠性（寿命、满发小时数）对资产折旧的影响远大于单一价格因素。</li>
+<li><b>碳捕获（DAC）费用缺失</b>：由于检索与依赖结论均未获取DAC成本，模型中未能量化。若未来DAC价格高达100-200 USD/吨CO₂，将进一步推高eSAF燃料最终售价。</li>
+<li><b>数据不确定性提示</b>：上述度电成本（LCOE）是2024年全球均值或最优值，考虑到中国本土光伏和风电LCOE可能更低（部分项目已低于0.02 USD/kWh），但若考虑离网型项目的储能配置需求，综合电价又会显著窜升。此外，电解槽价格按人民币汇率7.1折算，投标价与实际执行价或存差异。</li>
+</ul><div class="sources"><h4>📎 检索来源</h4><ol><li><a href="https://www.doc88.com/p-69919764274098.html" target="_blank" rel="noopener">【重点研报】可再生能源发电成本2023-211页 - 道客巴巴</a> <a class="src-link" href="https://www.doc88.com/p-69919764274098.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-12 · 道客巴巴</span></li><li><a href="https://max.book118.com/html/2024/0108/7023131045006026.shtm" target="_blank" rel="noopener">2024年全球电力市场供应与需求预测及可再生能源发展趋势.pptx-原创力文档</a> <a class="src-link" href="https://max.book118.com/html/2024/0108/7023131045006026.shtm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-01-09 · 原创力文档</span></li><li><a href="https://max.book118.com/html/2024/0119/6122104112010035.shtm" target="_blank" rel="noopener">2024年可再生能源发电成本持续下降.pptx-原创力文档</a> <a class="src-link" href="https://max.book118.com/html/2024/0119/6122104112010035.shtm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-01-20 · 原创力文档</span></li><li><a href="https://power.ofweek.com/recommendfriends-30442563.html" target="_blank" rel="noopener">推荐给朋友: 可再生能源发电成本2019(强烈推荐) - OFweek电力网</a> <a class="src-link" href="https://power.ofweek.com/recommendfriends-30442563.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-04-18 · 电力</span></li><li><a href="https://m.bjx.com.cn/topics/dudianchengben/" target="_blank" rel="noopener">度电成本-北极星电力新闻网</a> <a class="src-link" href="https://m.bjx.com.cn/topics/dudianchengben/" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-07-12 · 北极星电力网</span></li><li><a href="https://m.book118.com/html/2024/0506/8056124037006065.shtm" target="_blank" rel="noopener">可再生能源2024年能源的新突破.pptx</a> <a class="src-link" href="https://m.book118.com/html/2024/0506/8056124037006065.shtm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-05-07 · 原创力文档</span></li><li><a href="https://download.csdn.net/download/njbaige/89366759" target="_blank" rel="noopener">可再生能源电能质量数据分析与预测.pptx资源-CSDN文库</a> <a class="src-link" href="https://download.csdn.net/download/njbaige/89366759" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-05-28 · CSDN文库</span></li><li><a href="http://m.ce.cn/cy/gd/202507/t20250728_2421856.shtml" target="_blank" rel="noopener">可再生能源在全球电力市场 保持成本优势_中国经济网</a> <a class="src-link" href="http://m.ce.cn/cy/gd/202507/t20250728_2421856.shtml" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-07-28 · 中国经济网</span></li><li><a href="https://www.sgpjbg.com/hyshuju/a14f03aba6c80ef46549f9b7ece9ffae.html" target="_blank" rel="noopener">图表118单台1000标方(5MW)碱性电解槽成本拆解-行业数据-三个皮匠报告</a> <a class="src-link" href="https://www.sgpjbg.com/hyshuju/a14f03aba6c80ef46549f9b7ece9ffae.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-01-21 · 三个皮匠报告</span></li><li><a href="https://mp.ofweek.com/hydrogen/a456714130577" target="_blank" rel="noopener">电解槽在卷什么?拆个1000标方碱性电解槽看看成本 - 维科号</a> <a class="src-link" href="https://mp.ofweek.com/hydrogen/a456714130577" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-11-21 · 维科号</span></li><li><a href="https://finance.sina.com.cn/wm/2024-03-06/doc-inamkuik9938458.shtml" target="_blank" rel="noopener">2024年电解槽价格调研:成本上升,技术挑战美元_新浪财经_新浪网</a> <a class="src-link" href="https://finance.sina.com.cn/wm/2024-03-06/doc-inamkuik9938458.shtml" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-03-06 · 新浪财经</span></li><li><a href="https://www.sohu.com/a/761644200_121124542" target="_blank" rel="noopener">【速记】朋友圈中的小数据:碱性电解制氢成本如何?_设备_项目_产品</a> <a class="src-link" href="https://www.sohu.com/a/761644200_121124542" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-03-04 · 搜狐</span></li><li><a href="https://bjdaxing.11467.com/info/30843482.htm" target="_blank" rel="noopener">2024-2030年全球与中国碱性电解槽市场趋势分析及投资价值研究报告</a> <a class="src-link" href="https://bjdaxing.11467.com/info/30843482.htm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-08-12 · 顺企网</span></li><li><a href="https://www.ofweek.com/hydrogen/2024-11/ART-180820-8420-30651396.html" target="_blank" rel="noopener">电解槽在卷什么?拆个1000标方碱性电解槽看看成本 - OFweek氢能网</a> <a class="src-link" href="https://www.ofweek.com/hydrogen/2024-11/ART-180820-8420-30651396.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-11-20 · OFweek维科网</span></li><li><a href="https://ecep.ofweek.com/2025-06/ART-93010-8120-30664235.html" target="_blank" rel="noopener">中国碱性电解槽价格下降的三重动因是什么 - OFweek环保网</a> <a class="src-link" href="https://ecep.ofweek.com/2025-06/ART-93010-8120-30664235.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-06-06 · OFweek环保网</span></li><li><a href="https://detail.1688.com/offer/737120707561.html" target="_blank" rel="noopener">厂家定制 碱性电解水电解槽 制氢设备氢氧机实验室工业生产设备-阿里巴巴</a> <a class="src-link" href="https://detail.1688.com/offer/737120707561.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-01-14 · 1688</span></li><li><a href="https://www.donews.com/news/detail/8/5209185.html" target="_blank" rel="noopener">碳捕获技术助力海运业减排但仍存争议</a> <a class="src-link" href="https://www.donews.com/news/detail/8/5209185.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-05-16 · DoNews</span></li><li><a href="https://www.sohu.com/a/763603463_121822479" target="_blank" rel="noopener">2024碳捕获,价值捕获_ 碳捕获商业模式综述报告(英文版)(附下载)_技术_二氧化碳_规模</a> <a class="src-link" href="https://www.sohu.com/a/763603463_121822479" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-03-12 · 搜狐</span></li><li><a href="https://www.sohu.com/a/763619561_121656383" target="_blank" rel="noopener">2024碳捕获,价值捕获_ 碳捕获商业模式综述报告(英文版)(附下载)_二氧化碳_技术_规模</a> <a class="src-link" href="https://www.sohu.com/a/763619561_121656383" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-03-14 · 搜狐</span></li><li><a href="https://www.renrendoc.com/paper/320654500.html" target="_blank" rel="noopener">2024年全球碳捕获和存储技术发展现状与投资机会分析.pptx - 人人文库</a> <a class="src-link" href="https://www.renrendoc.com/paper/320654500.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-03-25 · 人人文库</span></li><li><a href="https://max.book118.com/html/2024/0212/7144056062006041.shtm" target="_blank" rel="noopener">碳捕集的十大应用场景与成本介绍.pdf-原创力文档</a> <a class="src-link" href="https://max.book118.com/html/2024/0212/7144056062006041.shtm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-02-24 · 原创力文档</span></li><li><a href="https://www.grcc.vip/article-35046.html" target="_blank" rel="noopener">DNV:2024船上碳捕获的潜力报告(英文版)-GRCC 科技文库</a> <a class="src-link" href="https://www.grcc.vip/article-35046.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-06-29 · www.grcc.vip</span></li><li><a href="https://m.bjx.com.cn/topics/tanbujichengben/" target="_blank" rel="noopener">碳捕集成本-北极星电力新闻网</a> <a class="src-link" href="https://m.bjx.com.cn/topics/tanbujichengben/" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-05 · 北极星电力网</span></li><li><a href="http://www.cir.cn/3/58/TanBuJiDeFaZhanQuShi.html" target="_blank" rel="noopener">2024年碳捕集的发展趋势 - 2024年中国碳捕集市场现状调研与发展趋势预测分析报告 - 产业调研网</a> <a class="src-link" href="http://www.cir.cn/3/58/TanBuJiDeFaZhanQuShi.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-01-01 · 产业调研网</span></li></ol></div></div></article>
+<article class="card"><div class="card-head"><span class="no">4</span><h2>市场规模、需求与增长驱动</h2><span class="tag">市场现状与需求预测</span><span class="dep">依赖 3</span></div><div class="concl">全球航空燃料消费已近恢复至疫情前水平，在欧盟“2%-6%-70%”强制掺混时间表等政策驱动下，2030年全球SAF需求量有望突破1800万吨；而eSAF作为成本门槛尚在突破阶段的路线，其占比高度依赖于绿电与碳捕获成本的下降，2040—2050年的需求空间存在极大的不确定性。</div><div class="body"><h5>1. 全球航空燃料总体消费量现状（2023—2024）</h5>
+<ul>
+<li><b>总体规模</b>：2019年全球航空公司消耗约960亿加仑航空燃料，支出约1900亿美元。经历2020年暴跌后，2022年使用量回升至770亿加仑，支出却升至2150亿美元。2024年燃料使用量预计基本恢复至2019年水平，但因地缘冲突等因素，燃料总支出预计将高达2910亿美元，较2019年高出约53%（燃料成本占航空公司总支出比例升至32%）[2024-08-28|品橙旅游/IATA]。</li>
+<li><b>区域恢复</b>：2023年亚太市场航空煤油消费恢复加速，中国消费量达80万桶/日，接近2019年水平；欧美市场已基本恢复至疫情前，而全球航空煤油消费量较疫情前仍约有10%差距[2024-06-25|报告大厅]。</li>
+</ul>
+<h5>2. SAF渗透路径与强制掺混时间表</h5>
+<ul>
+<li><b>政策核心</b>：燃料加注SAF是航空业实现净零排放的关键手段，预计2050年65%的减排贡献将来自SAF。政策强制掺混比例是主要推手：</li>
+<li><b>欧盟</b>：率先设定SAF强制掺混比例，目标为2025年2%、2030年6%、2050年70%[2025-02-10|招商证券]。</li>
+<li><b>其他地区</b>：英国、韩国、印度等也明确了强制掺混比例；中国提出力争2025年SAF消费量达到2万吨以上[同上]。</li>
+<li><b>当前渗透率</b>：全球SAF需求量从2019年的不足2万吨，迅速增至2023年的24万吨，但基数仍极低。2023年全球SAF产能约为13亿加仑（约393万吨），显著高于实际使用量，表明产能利用率尚有提升空间[2025-02-10|招商证券；2024-08-22|毕马威]。</li>
+</ul>
+<h5>3. 全球SAF需求空间预估（2030/2040/2050）</h5>
+<ul>
+<li><b>2030年</b>：招商证券预测，伴随强制掺混政策落地，2030年全球SAF需求量将超过1800万吨；全球SAF产能预计从2023年的13亿加仑增长至近60亿加仑（约1816万吨），市场预期规模达到400—550亿美元[2025-02-10|招商证券；2024-08-22|毕马威]。贝哲斯咨询则预测2032年全球SAF市场规模约148.2亿美元（口径差异可能源于价格与统计范围不同）[2024-11-15|贝哲斯咨询]。综合判断，2030年SAF需求在1800—2300万吨区间，此为“政策强制情景”下的中高预测。</li>
+<li><b>2040与2050年</b>：检索结果未提供机构对2040年的专门量值。若以2050年欧盟70%的强制掺混目标为锚，假设全球航空燃料消费量与2019年持平（约2.9亿吨），2050年SAF需求将达约2.0亿吨；若考虑航空运输增长（如IATA预测的长期增长），需求将更高。但须注意，这一推算仅为机械乘算，未考虑技术进步、可替代燃料经济性及全球政策执行差异，不确定性极大。目前无单一权威机构发布2040/2050年eSAF细分需求预测。</li>
+</ul>
+<h5>4. eSAF的预期占比与关键不确定性</h5>
+<ul>
+<li><b>eSAF定位</b>：eSAF（电转液路线）属于SAF的一种，其商业化仍受制于绿电成本、DAC成本及系统集成费。依赖结论指出，在绿电价格低至0.034 USD/kWh的乐观情景下，能源成本已跨过经济性门槛，但DAC和集成成本仍是瓶颈。</li>
+<li><b>占比预判</b>：检索结果中未见专门针对eSAF在总SAF中占比的定量预测。2024年生物燃料（如HEFA）占据SAF市场最大份额（57%），而电转液路线尚处于早期商业化阶段。因而eSAF在2030年前预计占比仍低（可能低于10%），其份额能否在2040年后快速提升，取决于各国对非生物质SAF的激励政策以及DAC技术的规模化降本曲线。当前预测差异极大，从“极小份额”到“乐观情景下2035年后成为主要路线”均有可能，缺乏一致共识。</li>
+</ul>
+<h5>5. 需求驱动力与抑制因素</h5>
+<ul>
+<li><b>核心驱动力</b>：</li>
+<li><b>合规压力</b>：欧盟、英国等多地的强制掺混立法，形成刚性需求底线。</li>
+<li><b>企业自主承诺</b>：全球航空公司通过SAF使用实现双碳承诺，2050年净零排放目标中65%依靠SAF，产生自愿需求。</li>
+<li><b>绿色融资与可持续形象</b>：航空公司可使用SAF对冲碳配额成本，并获取ESG融资溢价。</li>
+<li><b>主要抑制因素</b>：</li>
+<li><b>成本与价格</b>：当前SAF价格显著高于传统航煤，地缘冲突进一步推高燃料基础价格，增加替代成本压力[2024-08-28|品橙旅游]。</li>
+<li><b>原料与供应链瓶颈</b>：生物质原料供应不足可能阻碍生产，炼油厂缺乏会降低掺混效率；eSAF则面临DAC成本与绿电波动挑战[2024-11-15|贝哲斯咨询]。</li>
+<li><b>政策执行不确定性</b>：各国强制目标与实际落地之间存在落差，尤其对于未明确2030年后强制比例的广阔市场，需求释放节奏存疑。</li>
+</ul>
+<p><b>数据年份与局限性声明</b>：本步结论所引全球航空燃料消费数据以2024年IATA预测为基础，SAF需求量预测以2025年2月招商证券研报为主要参考（其基准年为2023—2024），2050年推算为简单按比例放大，未纳入航空交通增长模型的复杂分析。当前各机构预测差异较大，最终eSAF需求高度依赖政策执行力度与关键技术突破，需持续跟踪ICAO长期目标及各国最新立法进展。</p><div class="sources"><h4>📎 检索来源</h4><ol><li><a href="http://www.pinchain.com/article/318201" target="_blank" rel="noopener">数据:预计2024年全球航空燃料支出将达到2910亿美元 – 品橙旅游</a> <a class="src-link" href="http://www.pinchain.com/article/318201" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-08-28 · 品橙旅游</span></li><li><a href="https://www.sohu.com/a/802464906_121903451" target="_blank" rel="noopener">2024-2030年全球及中国航空燃料行业发展状况及前景投资趋势预测报告_销量</a> <a class="src-link" href="https://www.sohu.com/a/802464906_121903451" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-08-21 · 搜狐</span></li><li><a href="https://finance.sina.com.cn/stock/usstock/c/2023-12-26/doc-imzzkits9039468.shtml" target="_blank" rel="noopener">机构预测2024年航空燃料需求继续复苏、价格上涨新冠肺炎_新浪财经_新浪网</a> <a class="src-link" href="https://finance.sina.com.cn/stock/usstock/c/2023-12-26/doc-imzzkits9039468.shtml" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2023-12-26 · 新浪财经</span></li><li><a href="https://www.globalmarketmonitor.com.cn/market_news/2931605.html" target="_blank" rel="noopener">可持续航空燃料行业发展态势:2024-2032年全球市场规模增长达143.6亿美元</a> <a class="src-link" href="https://www.globalmarketmonitor.com.cn/market_news/2931605.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-11-15 · 贝哲斯咨询</span></li><li><a href="https://www.chinabaogao.com/baogao/202405/709954.html" target="_blank" rel="noopener">中国飞机燃料行业发展深度研究与投资趋势预测报告(2024-2031年)_观研报告网</a> <a class="src-link" href="https://www.chinabaogao.com/baogao/202405/709954.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-05-01 · 行业数据网</span></li><li><a href="https://m.renrendoc.com/paper/319507425.html" target="_blank" rel="noopener">2024年全球航空业或面临燃料危机</a> <a class="src-link" href="https://m.renrendoc.com/paper/319507425.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-03-20 · 人人文库</span></li><li><a href="http://big5.chinabgao.com/freereport/94395.html" target="_blank" rel="noopener">2024年航空煤油市場需求量分析:全球航空煤油消費量降至470.8萬桶/日_報告大廳</a> <a class="src-link" href="http://big5.chinabgao.com/freereport/94395.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-06-25 · 報告大廳</span></li><li><a href="https://www.sohu.com/a/802688654_121503203" target="_blank" rel="noopener">2024航空替代燃料的演变报告-利用新技术实现更可持续的行业(英文版)_全球_毕马威_相运</a> <a class="src-link" href="https://www.sohu.com/a/802688654_121503203" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-08-22 · 搜狐</span></li><li><a href="http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/792523585502/index.phtml" target="_blank" rel="noopener">生物航煤(SAF)行业深度报告:政策驱动需求增长 行业产能加速释放__新浪财经_新浪网</a> <a class="src-link" href="http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/792523585502/index.phtml" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-10 · 新浪财经</span></li><li><a href="https://m.hibor.com.cn/wap_detail.aspx?id=dae37d35df67be09e174b08c2225736b" target="_blank" rel="noopener">招商证券-环保及公用事业行业生物航煤（SAF）行业深度报告：政策驱动需求增长，行业产能加速释放-250210</a> <a class="src-link" href="https://m.hibor.com.cn/wap_detail.aspx?id=dae37d35df67be09e174b08c2225736b" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-10 · 慧博投研资讯</span></li><li><a href="https://m.10jqka.com.cn/20250210/c665901548.html" target="_blank" rel="noopener">券商观点|生物航煤（SAF）行业深度报告：政策驱动需求增长，行业产能加速释放</a> <a class="src-link" href="https://m.10jqka.com.cn/20250210/c665901548.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-10 · 同花顺</span></li><li><a href="http://www.baiouyuan.com/news/jujiao/353278.html" target="_blank" rel="noopener">招商证券：欧美SAF生产项目持续推进 原材料优势将助力中国大规模产能建设</a> <a class="src-link" href="http://www.baiouyuan.com/news/jujiao/353278.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-12 · www.baiouyuan.com</span></li><li><a href="https://finance.sina.com.cn/stock/hkstock/ggscyd/2025-02-11/doc-inekccef3380623.shtml" target="_blank" rel="noopener">招商证券:欧美SAF生产项目持续推进 原材料优势将助力中国大规模产能建设招商证券_新浪财经_新浪网</a> <a class="src-link" href="https://finance.sina.com.cn/stock/hkstock/ggscyd/2025-02-11/doc-inekccef3380623.shtml" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-11 · 新浪财经</span></li><li><a href="https://caifuhao.eastmoney.com/news/20240802165427151459170" target="_blank" rel="noopener">AI回答SAF市场前景,目前平均售价2600美元/吨_财富号_东方财富网</a> <a class="src-link" href="https://caifuhao.eastmoney.com/news/20240802165427151459170" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-08-02 · 财富号</span></li><li><a href="http://caifuhao.eastmoney.com/news/20250211171308027630750" target="_blank" rel="noopener">招商证券：欧美SAF生产项目持续推进 原材料优势将助力中国大规模产能建设</a> <a class="src-link" href="http://caifuhao.eastmoney.com/news/20250211171308027630750" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-12 · 财富号</span></li><li><a href="https://finance.sina.cn/hkstock/gsxw/2025-02-11/detail-inekccef3380623.d.html" target="_blank" rel="noopener">招商证券：欧美SAF生产项目持续推进 原材料优势将助力中国大规模产能建设</a> <a class="src-link" href="https://finance.sina.cn/hkstock/gsxw/2025-02-11/detail-inekccef3380623.d.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-12 · 新浪财经</span></li><li><a href="https://bjchaoyang.11467.com/info/42019022.htm" target="_blank" rel="noopener">全球与中国电可持续航空燃料 (e-SAF)市场前景预测及投资前景调研2025-2031年</a> <a class="src-link" href="https://bjchaoyang.11467.com/info/42019022.htm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-08-11 · 北京朝阳企业网</span></li><li><a href="http://www.caaeia.org.cn/detail/strategic/979" target="_blank" rel="noopener">利用电转液技术生产可持续航空燃料用以实现航空业脱碳</a> <a class="src-link" href="http://www.caaeia.org.cn/detail/strategic/979" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2021-12-15 · 宇泽科技</span></li><li><a href="https://www.vzkoo.com/document/4625459379548721152.html" target="_blank" rel="noopener">环保行业深度报告:生物油专题系列3,航空减碳当前唯一解,SAF扩产周期中废油脂资源稀缺增值!.pdf - 文档下载 - 未来智库</a> <a class="src-link" href="https://www.vzkoo.com/document/4625459379548721152.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2026-01-14 · 未来智库</span></li><li><a href="https://www.zhitongcaijing.com/content/detail/1452768.html" target="_blank" rel="noopener">国际航协:2026年全球可持续航空燃料产量预计将达到约240万吨 仅占航空燃料总用量的0.8%</a> <a class="src-link" href="https://www.zhitongcaijing.com/content/detail/1452768.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2026-06-10 · 智通财经网</span></li><li><a href="https://m.sohu.com/a/876097337_100180709/?pvid=000115_3w_a" target="_blank" rel="noopener">亚洲SAF价格降至2000美元，企业抢占2025年欧盟生物航煤市场红利</a> <a class="src-link" href="https://m.sohu.com/a/876097337_100180709/?pvid=000115_3w_a" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-03-27 · 手机搜狐网</span></li></ol></div></div></article>
+<article class="card"><div class="card-head"><span class="no">5</span><h2>竞争格局与核心企业</h2><span class="tag">竞争格局与玩家分析</span><span class="dep">依赖 3,4</span></div><div class="concl">截至2025年8月的公开检索中，可明确辨识的全球eSAF项目玩家极为有限，大部分宣布产能仍集中于传统HEFA路线；仅Power2X/Advario在鹿特丹的PtL项目公布了25万吨/年产能目标，而其他eSAF专项玩家（如Velocys、Synhelion）的产能规划与融资进展在本次检索中未覆盖。</div><div class="body"><p>详细展开如下。</p>
+<h5>一、eSAF玩家的辨识与局限</h5>
+<p>本次检索到的SAF相关项目，绝大部分采用HEFA（油脂加氢）或生物质气化耦合绿氢路线，而非严格意义上的eSAF（电制SAF，即PtL）。因此，必须谨慎区分两类主体，避免将传统SAF产能混入eSAF竞争格局。</p>
+<div class="tbl-wrap"><table><thead><tr><th>玩家类型</th><th>代表企业（检索中出现）</th><th>是否属于 eSAF？</th><th>说明</th></tr></thead><tbody>
+<tr><td><b>综合能源公司</b></td><td>中国石化、道达尔能源</td><td><b>否（HEFA）</b></td><td>[2024-03-26 签署合作框架协议；2024-11-06 搜狐报道] 该23万吨/年项目明确使用“废弃油脂”，属HEFA技术，非eSAF。</td></tr>
+<tr><td><b>专精型技术商</b></td><td>Synhelion, Velocys</td><td>是，但<b>检索未覆盖</b>其产能与融资</td><td>在检索结果中，关于“Synhelion 融资 进展”的搜索完全未返回其相关信息；Velocys未被提及。其技术路线（如高温太阳能热化学/PtL费托）虽符合eSAF，但项目具体进展不明。</td></tr>
+<tr><td><b>机场/国家石油公司</b></td><td>国家电投</td><td><b>不明确</b></td><td>[2024-12-06 小牛行研] 图表中列出“国家电投和国泰航空”，技术标注为“类似于PTL”，产能为“4套5-10”万吨/年，预计“2024年至2026年”。此为最接近eSAF的中国项目线索，但缺乏官方公告核实。</td></tr>
+</tbody></table></div>
+<h5>二、唯一可确认的万吨级 eSAF 项目：Power2X</h5>
+<p>根据检索到的明确信息，全球范围内唯一有具体产能数字和目标时间的eSAF项目为：</p>
+<ul>
+<li><b>项目方</b>：Power2X 和 Advario</li>
+<li><b>地点</b>：荷兰鹿特丹港</li>
+<li><b>技术路线</b>：eSAF（原文表述为“e-SAF是一种由绿色氢制成的非化石合成燃料”），即在PtL（电力制液体燃料）范畴内。</li>
+<li><b>宣布产能</b>：超过25万吨/年。</li>
+<li><b>项目状态</b>：规划中，定位为“全球最大的e- SAF生产基地之一”。</li>
+<li><b>数据截至</b>：该报道发布于2025-01-31，引用自 china-nengyuan.com。</li>
+</ul>
+<h5>三、被检索出但应排除的SAF产能（非eSAF）</h5>
+<p>大量检索结果讨论了中国的SAF项目，但均为HEFA路线。为清晰区分，现列举如下，明确其不纳入eSAF竞争分析：</p>
+<div class="tbl-wrap"><table><thead><tr><th>项目方</th><th>地点</th><th>产能（万吨/年）</th><th>状态</th><th>技术路线</th></tr></thead><tbody>
+<tr><td>中石化镇海炼化</td><td>浙江宁波</td><td>未明确</td><td>2022年6月已运营</td><td>HEFA</td></tr>
+<tr><td>君恒生物</td><td>河南濮阳</td><td>未明确</td><td>2023年10月已运营</td><td>HEFA</td></tr>
+<tr><td>易高环保</td><td>江苏张家港</td><td>未明确</td><td>2022年底已运营</td><td>HEFA</td></tr>
+<tr><td>海新能科</td><td>山东日照</td><td>未明确</td><td>2024年2月已运营</td><td>HEFA</td></tr>
+<tr><td>嘉澳环保/嘉澳新能源</td><td>江苏连云港</td><td>约35</td><td>2024年11月投料成功</td><td>HEFA</td></tr>
+<tr><td>鹏鹞环保</td><td>辽宁盘锦</td><td>10</td><td>2024年9月公告投产</td><td>HEFA</td></tr>
+<tr><td>山东海科化工</td><td>山东东营</td><td>约30</td><td>2023年3月已开工</td><td>HEFA</td></tr>
+</tbody></table></div>
+<p>这些产能均为传统SAF，不依赖绿氢与捕获的CO₂。</p>
+<h5>四、关键竞争要素对比（数据极度缺乏）</h5>
+<p>基于以上有限信息，无法进行有意义的全面对比：</p>
+<ul>
+<li><b>技术路线选择</b>：唯一确认的eSAF项目Power2X采用绿氢制eSAF，推测为PtL路线。Velocys（PtL费托）与Synhelion（太阳能热化学）的技术路线虽为业界熟知，但<b>检索未覆盖</b>其具体项目产能或融资进展。</li>
+<li><b>合作伙伴生态</b>：Power2X的合作伙伴为储运企业Advario；国家电投则可能联手国泰航空（但未确认）。</li>
+<li><b>融资进展</b>：本次对Synhelion、“eSAF融资”的检索，均未返回与eSAF主体直接相关的融资轮次与金额，反而误检了核聚变公司Helion与DeFi项目SynFutures的融资信息。因此，各eSAF玩家的最新融资情况<b>检索未覆盖</b>。</li>
+</ul>
+<h5>结论</h5>
+<p>当前公开可溯源信息中，全球eSAF领域已宣布的具体项目极少，仅Power2X/Advario的鹿特丹25万吨/年规划项目可被证实。绝大多数所谓“SAF项目”均为HEFA路线，不应混淆。Velocys、Synhelion等专精技术商与壳牌、道达尔等综合能源公司在eSAF方面的专属布局、产能规划与融资情况，在本次检索结果中<b>均完全缺失</b>，无法进行玩家间横向对比。</p><div class="sources"><h4>📎 检索来源</h4><ol><li><a href="https://m.sohu.com/a/824100542_121123885/?pvid=000115_3w_a" target="_blank" rel="noopener">2024中国最新SAF项目盘点：中石化、道达尔、中能建、广西宏坤、海科化工、久泰、嘉澳、正泰新能源、君恒、金尚环保，总投资近千亿</a> <a class="src-link" href="https://m.sohu.com/a/824100542_121123885/?pvid=000115_3w_a" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-11-06 · 手机搜狐网</span></li><li><a href="https://business.sohu.com/a/824100542_121123885" target="_blank" rel="noopener">2024中国最新SAF项目盘点:中石化、道达尔、中能建、广西宏坤、海科化工、久泰、嘉澳、正泰新能源、君恒、金尚环保,总投资近千亿_生物质_燃料</a> <a class="src-link" href="https://business.sohu.com/a/824100542_121123885" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-11-06 · 搜狐</span></li><li><a href="https://bjchaoyang.11467.com/info/42019022.htm" target="_blank" rel="noopener">全球与中国电可持续航空燃料 (e-SAF)市场前景预测及投资前景调研2025-2031年</a> <a class="src-link" href="https://bjchaoyang.11467.com/info/42019022.htm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-08-11 · 北京朝阳企业网</span></li><li><a href="https://www.hangyan.co/charts/3517098276618765750" target="_blank" rel="noopener">中国SAF产能梳理 - 行业研究数据 - 小牛行研</a> <a class="src-link" href="https://www.hangyan.co/charts/3517098276618765750" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-06 · 小牛行研</span></li><li><a href="http://www.china-nengyuan.com/news/china-nengyuan_news_216878.pdf" target="_blank" rel="noopener">年产25万吨!鹿特丹港开发全球最大eSAF枢纽</a> <a class="src-link" href="http://www.china-nengyuan.com/news/china-nengyuan_news_216878.pdf" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-01-31 · www.china-nengyuan.com</span></li><li><a href="https://www.sohu.com/a/961192467_122346174?scm=10001.8085_13-8085_13.0.0.0" target="_blank" rel="noopener">41页|2025中国可持续航空燃料新图景-电制SAF报告_技术_政策_目标</a> <a class="src-link" href="https://www.sohu.com/a/961192467_122346174?scm=10001.8085_13-8085_13.0.0.0" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-12-09 · 搜狐</span></li><li><a href="https://m.sohu.com/a/849961580_121615303" target="_blank" rel="noopener">2024年可持续航空燃料的商业腾飞之路报告（英文版）</a> <a class="src-link" href="https://m.sohu.com/a/849961580_121615303" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-01-17 · 手机搜狐网</span></li><li><a href="https://finance.sina.cn/2025-02-07/detail-ineirmwh0195331.d.html" target="_blank" rel="noopener">分水岭将至：2024年全球电动航空发展回顾</a> <a class="src-link" href="https://finance.sina.cn/2025-02-07/detail-ineirmwh0195331.d.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-08 · 新浪财经</span></li><li><a href="https://news.qq.com/rain/a/20260604A09IQH00" target="_blank" rel="noopener">核聚变能源公司Helion以约155亿美元估值完成新一轮融资,投资机构 Thrive 领投_腾讯新闻</a> <a class="src-link" href="https://news.qq.com/rain/a/20260604A09IQH00" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2026-06-04 · 腾讯网</span></li><li><a href="https://www.nuclear-fusion.com.cn/blog/helion-energy-4-f" target="_blank" rel="noopener">Helion Energy完成超4亿美元的F轮融资，加速推进商业聚变电厂建设</a> <a class="src-link" href="https://www.nuclear-fusion.com.cn/blog/helion-energy-4-f" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-01 · www.nuclear-fusion.com.cn</span></li><li><a href="https://www.qklw.com/lives/20231019/330412.html" target="_blank" rel="noopener">永续期货DEX SynFutures B轮融资2200万美元,Pantera Capital领投 - 区块链网</a> <a class="src-link" href="https://www.qklw.com/lives/20231019/330412.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2023-10-19 · 区块链网</span></li><li><a href="https://www.cnnpn.cn/tag/302.html" target="_blank" rel="noopener">核聚变</a> <a class="src-link" href="https://www.cnnpn.cn/tag/302.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-12 · 中国核电网</span></li><li><a href="https://c.m.163.com/news/a/JN7Q69ML0514B52J.html" target="_blank" rel="noopener">初创开发核聚变发电技术　声称2028年可投入应用</a> <a class="src-link" href="https://c.m.163.com/news/a/JN7Q69ML0514B52J.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-01-31 · 网易新闻客户端</span></li><li><a href="https://www.iyiou.com/briefing/197001211704121" target="_blank" rel="noopener">Acceleron Fusion完成2400万美元融资,拓展μ子催化聚变新路线_亿欧快讯</a> <a class="src-link" href="https://www.iyiou.com/briefing/197001211704121" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-07 · www.iyiou.com</span></li><li><a href="https://news.qq.com/rain/a/20260605A039CU00" target="_blank" rel="noopener">Helion完成4.65亿美元融资,核聚变商业化提速_腾讯新闻</a> <a class="src-link" href="https://news.qq.com/rain/a/20260605A039CU00" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2026-06-05 · 腾讯网</span></li><li><a href="http://vcxpe.com/bigdata/finan-event/p2.html?round=&amp;capital=Anthemis+Group" target="_blank" rel="noopener">融资事件-创融界</a> <a class="src-link" href="http://vcxpe.com/bigdata/finan-event/p2.html?round=&amp;capital=Anthemis+Group" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-01-25 · vcxpe.com</span></li><li><a href="https://chem.jgvogel.cn/c1586432.shtml" target="_blank" rel="noopener">EcoCeres联手多家航司在华启动SAF试点项目 - 最新要闻 - PROCESS流程工业</a> <a class="src-link" href="https://chem.jgvogel.cn/c1586432.shtml" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2026-03-26 · chem.jgvogel.cn</span></li><li><a href="http://www.loringenergy.com/" target="_blank" rel="noopener">Loring Energy Projects</a> <a class="src-link" href="http://www.loringenergy.com/" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-14 · www.loringenergy.com</span></li><li><a href="https://www.sohu.com/a/957189376_121123885?scm=10001.8085_13-8085_13.0.0.0" target="_blank" rel="noopener">劳斯莱斯启动SAF研究_飞机尾迹_英国_影响</a> <a class="src-link" href="https://www.sohu.com/a/957189376_121123885?scm=10001.8085_13-8085_13.0.0.0" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-11-22 · 搜狐</span></li><li><a href="https://download.csdn.net/download/u012622241/16053107" target="_blank" rel="noopener">saf-lxc-start-openwrt.7z资源-CSDN文库</a> <a class="src-link" href="https://download.csdn.net/download/u012622241/16053107" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2021-03-23 · CSDN文库</span></li><li><a href="https://www.docin.com/p-624168020.html" target="_blank" rel="noopener">Pre-Feasibility &amp; Feasibility Studies for Road Sections of the - 豆丁网</a> <a class="src-link" href="https://www.docin.com/p-624168020.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2013-03-29 · 豆丁网</span></li><li><a href="http://sc.neu.edu.cn/2023/0906/c114a234819/page.htm" target="_blank" rel="noopener">SAF2024年寒假及春季海外交流项目报名通知</a> <a class="src-link" href="http://sc.neu.edu.cn/2023/0906/c114a234819/page.htm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2023-09-06 · sc.neu.edu.cn</span></li><li><a href="https://www.nedo.go.jp/english/activities/activities_ZZJP_100127.html" target="_blank" rel="noopener">Development of Production Technologies for Biojet Fuels  NEDO</a> <a class="src-link" href="https://www.nedo.go.jp/english/activities/activities_ZZJP_100127.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-07-22 · www.nedo.go.jp</span></li><li><a href="https://www.icao.int/environmental-protection/Documents/EnvironmentalReports/2022/ENVReport2022_Art49.pdf" target="_blank" rel="noopener">New Sustainable Aviation</a> <a class="src-link" href="https://www.icao.int/environmental-protection/Documents/EnvironmentalReports/2022/ENVReport2022_Art49.pdf" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2019-04-18 · www.icao.int</span></li></ol></div></div></article>
+<article class="card"><div class="card-head"><span class="no">6</span><h2>政策与法规框架</h2><span class="tag">政策与制度梳理</span><span class="dep">依赖 1,3</span></div><div class="concl">欧盟ReFuelEU Aviation法规已设定具有强制性的SAF掺混目标（2025年2%、2030年6%、2050年70%），并单独要求2030年合成燃料子目标0.7%；但关于CORSIA、美国IRA 45Z及英国、日韩等区域政策关键细节，本次检索未能覆盖，需另行补充。</div><div class="body"><p><b>详细展开</b></p>
+<p><b>一、欧盟ReFuelEU Aviation（核心政策）</b></p>
+<ul>
+<li><b>法律文件</b>：(EU) 2023/2405 法规，2023年通过并发布，具有强制力。</li>
+<li><b>整体掺混目标</b>（占航空燃料总供应量的比例，基于体积/能量）：</li>
+<li>2025年：至少 <b>2%</b>；</li>
+<li>2030年：至少 <b>6%</b>；</li>
+<li>2035年：至少 <b>20%</b>（引用文中有“每5年逐步增加”，此处按Eurocontrol目标路线推演，但检索结果未给出具体中间值）；</li>
+<li>2040年：至少 <b>32%</b>；</li>
+<li>2045年：至少 <b>38%</b>；</li>
+<li>2050年：至少 <b>70%</b>。</li>
+<li>*来源：2023-10-27报道明确给出2025、2030、2050节点比例；2035后比例原文未列全，此处按典型“Fit for 55”路线补充，仅供参考，需以法规原文为准。*</li>
+<li><b>eSAF 子目标</b>：法规要求合成燃料（eSAF）在总SAF中占有一定份额。至 <b>2030 年</b>，合成航空燃料的最低份额为 <b>0.7%</b>（该比例为总体燃料供应中的占比，独立于SAF总比例）。</li>
+<li>*来源：2024-12-05 EASA报告明确指出“到2030年达到合成航空燃料的最低份额（0.7%）”。*</li>
+<li><b>生效状态</b>：法规已通过，2025年起强制实施。EASA 已于2024年底发布首份市场状况报告，作为2025年度技术报告的前身。</li>
+<li><b>政策风险</b>：目前无修订迹象，但产能不足的风险被EASA强调——“需要迅速采取行动，确保到2030年达到合成航空燃料的最低份额”。</li>
+</ul>
+<p><b>二、其他关键政策（检索未覆盖，仅列已知框架）</b></p>
+<ul>
+<li><b>ICAO CORSIA</b>：检索结果未提供合格燃料准则的最新（2024）版本或具体执行细则，无法在此梳理。</li>
+<li><b>美国IRA 45Z（SAF税收抵免）</b>：检索结果无相关内容，无法提供补贴金额（如1.75美元/加仑）、生效日或最新修订。</li>
+<li><b>英国SAF命令</b>：未出现在检索结果中。</li>
+<li><b>日韩具体掺混路线图</b>：未出现。</li>
+<li><b>ASTM D7566 Annex（认证标准）</b>：无检索信息，无法引述。</li>
+</ul>
+<p><b>结论</b>：在本次检索范围内，仅能系统梳理 <b>ReFuelEU Aviation</b> 的量化目标及eSAF子目标，其余核心政策（CORSIA、IRA、英国/日韩）因检索结果缺失，暂无法满足“系统梳理”的要求，建议开展针对性补充检索。</p><div class="sources"><h4>📎 检索来源</h4><ol><li><a href="https://www.guifanku.com/837547.html" target="_blank" rel="noopener">GB 20997-2024 轻型商用车辆燃料消耗量限值及评价指标.pdf - 规范库(原图集吧)</a> <a class="src-link" href="https://www.guifanku.com/837547.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-10-16 · 道客巴巴</span></li><li><a href="https://www.guifanku.com/854647.html" target="_blank" rel="noopener">GB 19578-2024 乘用车燃料消耗量限值.pdf - 规范库</a> <a class="src-link" href="https://www.guifanku.com/854647.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-30 · 道客巴巴</span></li><li><a href="https://www.doc88.com/p-90520594930101.html" target="_blank" rel="noopener">2024年迈向可持续燃料的共同标准(英) - 道客巴巴</a> <a class="src-link" href="https://www.doc88.com/p-90520594930101.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-10 · 道客巴巴</span></li><li><a href="https://www.antpedia.com/standard/1252492946.html" target="_blank" rel="noopener">BS EN 16942:2024 燃料 车辆兼容性标识 消费者信息图形表达 标准</a> <a class="src-link" href="https://www.antpedia.com/standard/1252492946.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-18 · 分析测试百科网</span></li><li><a href="https://max.book118.com/html/2024/0920/7032051055006153.shtm" target="_blank" rel="noopener">GB 20997-2024轻型商用车辆燃料消耗量限值及评价指标.pdf-原创力文档</a> <a class="src-link" href="https://max.book118.com/html/2024/0920/7032051055006153.shtm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-09-20 · 原创力文档</span></li><li><a href="https://max.book118.com/html/2024/0920/8027045050006127.shtm" target="_blank" rel="noopener">中国国家标准 GB 20997-2024轻型商用车辆燃料消耗量限值及评价指标.pdf-原创力文档</a> <a class="src-link" href="https://max.book118.com/html/2024/0920/8027045050006127.shtm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-09-20 · 原创力文档</span></li><li><a href="https://www.spc.org.cn/online/617338584f223b83b1256008393363e1.html" target="_blank" rel="noopener">T/RXCZXH 007-2024 醇基燃料安全作业规范-中国标准在线服务网</a> <a class="src-link" href="https://www.spc.org.cn/online/617338584f223b83b1256008393363e1.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-11-07 · 标准在线</span></li><li><a href="https://www.antpedia.com/standard/1869596146.html" target="_blank" rel="noopener">CSA TS-601-2024</a> <a class="src-link" href="https://www.antpedia.com/standard/1869596146.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-09-14 · 分析测试百科网</span></li><li><a href="https://www.sohu.com/a/690449403_121123704" target="_blank" rel="noopener">国际民航  欧洲航空业呼吁尽快采用欧盟ReFuel航空法规_目标_包括_经济体</a> <a class="src-link" href="https://www.sohu.com/a/690449403_121123704" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2023-06-25 · 搜狐</span></li><li><a href="https://m.chinaerospace.com/article/55962" target="_blank" rel="noopener">欧洲航空安全局发布关于欧盟可持续航空燃料（SAF）市场的报告</a> <a class="src-link" href="https://m.chinaerospace.com/article/55962" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-05 · 航空产业网</span></li><li><a href="http://www.china-nengyuan.com/news/195532.html" target="_blank" rel="noopener">欧盟将最终确定首个绿色航空燃料SAF目标_新能源资讯_新能源网</a> <a class="src-link" href="http://www.china-nengyuan.com/news/195532.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2023-05-22 · www.china-nengyuan.com</span></li><li><a href="https://www.163.com/dy/article/II21VJO605148ALS.html" target="_blank" rel="noopener">Refuel EU:聚焦欧洲可持续航空燃料的重要协议欧盟eu赛峰集团_网易订阅</a> <a class="src-link" href="https://www.163.com/dy/article/II21VJO605148ALS.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2023-10-27 · 网易</span></li><li><a href="https://www.beipa.org.cn/newsinfo/6393759.html" target="_blank" rel="noopener">【国际动态】欧盟制定SAF使用新规-中国产业发展促进会生物质能产业分会</a> <a class="src-link" href="https://www.beipa.org.cn/newsinfo/6393759.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2023-09-21 · www.beipa.org.cn</span></li><li><a href="https://www.eurocontrol.int/concept/advanced-flexible-use-airspace" target="_blank" rel="noopener">Advanced flexible use of airspace (AFUA)  EUROCONTROL</a> <a class="src-link" href="https://www.eurocontrol.int/concept/advanced-flexible-use-airspace" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-08-20 · www.eurocontrol.int</span></li><li><a href="https://www.chinaautoms.com/m/view.php?aid=25467" target="_blank" rel="noopener">美国发布SAF抵免指南,推动航空减排_汽车总站网</a> <a class="src-link" href="https://www.chinaautoms.com/m/view.php?aid=25467" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-03 · www.chinaautoms.com</span></li><li><a href="https://www.sohu.com/a/811671546_121123885/" target="_blank" rel="noopener">美制定国内原料要求、45Z税收抵免仅适用于由国内生产的原料制成的燃料_法案_美国_行业</a> <a class="src-link" href="https://www.sohu.com/a/811671546_121123885/" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-09-25 · 搜狐</span></li><li><a href="https://www.7hcn.com/article/466449-1.html" target="_blank" rel="noopener">获取45Z抵免无望,菜油大幅下挫</a> <a class="src-link" href="https://www.7hcn.com/article/466449-1.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-01-17 · 七禾网</span></li><li><a href="https://www.sohu.com/a/863458388_121124363" target="_blank" rel="noopener">这家公司入账8亿多美金!IRA税收抵免“变现”记_Solar_First_制造</a> <a class="src-link" href="https://www.sohu.com/a/863458388_121124363" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-25 · 搜狐</span></li><li><a href="https://www.irs.gov/zh-hans/newsroom/save-for-retirement-now-get-a-tax-credit-later-savers-credit-can-help-low-and-moderate-income-taxpayers-save-more-in-2025" target="_blank" rel="noopener">现在就为退休储蓄,日后可获税收抵免:储户抵免优惠有助于中低收入纳税人在2025年增加储蓄  Internal Revenue Service</a> <a class="src-link" href="https://www.irs.gov/zh-hans/newsroom/save-for-retirement-now-get-a-tax-credit-later-savers-credit-can-help-low-and-moderate-income-taxpayers-save-more-in-2025" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-09 · IRS官网</span></li><li><a href="https://m.sohu.com/a/831687946_115863/?pvid=000115_3w_a" target="_blank" rel="noopener">美国45X税收抵免引争议，取消或影响光伏本土制造</a> <a class="src-link" href="https://m.sohu.com/a/831687946_115863/?pvid=000115_3w_a" target="_blank" rel="noopener">[原文]</a><span class="src-meta">手机搜狐网</span></li><li><a href="https://finance.sina.com.cn/roll/2022-09-20/doc-imqqsmrn9766746.shtml" target="_blank" rel="noopener">美国《2022年通胀削减法案》对生物燃料市场的影响税收抵免_新浪财经_新浪网</a> <a class="src-link" href="https://finance.sina.com.cn/roll/2022-09-20/doc-imqqsmrn9766746.shtml" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2022-09-20 · 新浪财经</span></li><li><a href="https://www.databm.com/news/33751770833286115.html" target="_blank" rel="noopener">First Solar 将向 Fiserv 出售高达 7 亿美元的 IRA 税收抵免-数字新能源</a> <a class="src-link" href="https://www.databm.com/news/33751770833286115.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2023-12-28 · 数字新能源网</span></li></ol></div></div></article>
+<article class="card"><div class="card-head"><span class="no">7</span><h2>商业化挑战与趋势研判</h2><span class="tag">瓶颈分析与未来趋势</span><span class="dep">依赖 1,2,3,4,5,6</span></div><div class="concl">制约eSAF规模化的首要瓶颈已从单一成本因素升级为“基础设施准入垄断、政策碎片化与绿氢供给经济性”三重锁定，其中机场燃料基础设施的垄断性接入限制是最被低估的即时障碍；2025—2030年仍将处于零星示范阶段，2030—2040年仅有条件实现局部初步商业化，2040年后若能突破基础设施所有权改革与绿氢成本曲线，方有规模化的可能。</div><div class="body"><p>---</p>
+<p><b>一、首要瓶颈的再提炼：基础设施准入已超越成本成为最直接卡点</b></p>
+<p>前期分析已确认绿电价格是eSAF成本的核心驱动，但近期产业调研和国际机构研判共同指向一个更迫在眉睫的障碍——机场燃料基础设施的接入限制。世界经济论坛与德勤2025年12月发布的报告明确指出，<b>全球59%的主要机场存在燃料基础设施接入限制</b>，常源自单一燃料供应商或有限供应商集团的基础设施所有权，这种垄断结构直接阻碍新生产商进入，推高交付成本[2025-12-22 | baogaobox.com]。在SAF产量仅占全球航空燃料0.1%的现状下，若基础设施不开放，即便eSAF生产成本降至与传统航煤平价，也可能因无法物理掺混、储存和进入机坪而“有油无处加”。</p>
+<p>与此同时，欧洲ReFuelEU Aviation强制掺混的执行扭曲了这一问题的严重性。国际航协IATA在2025年12月的最新报告中罕见地点名批评欧洲政策：“由于SAF产能有限和供应链寡头垄断，燃料供应商扩大了利润空间，导致航空公司支付的SAF价格最高是传统航油的五倍，且是市场SAF价格的两倍”[2025-12-09 | 证券时报/腾讯网]。这一现象表明，<b>上游生产端成本尚未有效传导为市场激励，反而被中间环节的准入壁垒和供应垄断转化为超级溢价</b>，进一步抑制了需求端的真实采购意愿。</p>
+<p><b>二、次生瓶颈的捆绑效应：绿氢成本、DAC成本与政策碎片化</b></p>
+<p>基础设施瓶颈并非孤立存在，它与前序步骤识别出的绿氢成本（20~40元/kg，折约2.8~5.6美元/kg）、DAC成本不明以及亚洲地区的政策碎片化和物流缺口形成捆绑。国际航协能源转型总监Hemant Mistry在2025年10月的专访中指出：“SAF的成本是传统航煤的2至5倍，而对于像e-SAF这样的新技术，成本预计将是传统航空燃料的7至8倍”[2025-10-08 | 证券之星股票频道]。这7~8倍的成本鸿沟背后，绿氢和DAC贡献了主要增量。</p>
+<p>在亚洲，物流基础设施的缺失进一步放大了成本压力。2025年9月亚太石油会议上的讨论强调，亚洲缺乏类似欧美的管道、驳船及铁路运输网络，若不加大投资使生产基地靠近原料产地与需求中心，<b>物流成本上升将削弱SAF市场竞争力</b>[2025-09-29 | chem.jgvogel.cn]。同时，亚洲多数市场尚未制定2030年后的SAF掺混长期目标，碎片化的政策无法为eSAF这类长周期、高资本投入的技术路线提供可预测的需求信号。</p>
+<p>技术推广的缓慢也同样构成制约。国际航协研究强调，现阶段唯一具有商业规模的SAF生产设施仍仅使用HEFA技术，多种原料路径（包括PtL）的商业规模推广仍待突破[2025-09-25 | 腾讯网]。这意味着eSAF的示范项目尚未有效进入化工与能源基础设施的投资视野。</p>
+<p><b>三、分阶段商业化情景研判（2025—2050）</b></p>
+<p>基于上述瓶颈分析，并综合IATA产量预期[2025-12-09]、亚太区域进展[2025-09-29]以及eSAF专项项目公开信息（目前仅Power2X/Advario鹿特丹25万吨/年PtL项目公布[依赖结论步骤5]），对eSAF商业化进度给出如下情境判断，并重点强调不确定性：</p>
+<ul>
+<li><b>2025—2030年：零星示范与系统性障碍暴露期</b></li>
+</ul>
+<p>  全球SAF产量2025年仅190万吨（占航空燃料0.6%），且2026年增速将放缓至240万吨，远未达预期[2025-12-09]。eSAF在该阶段几乎无实际商业产量，目前已知的PtL示范项目仍停留在单一工厂规模。该阶段主要成果将是暴露并确认上述基础设施垄断、政策扭曲等问题。若欧盟和亚洲主要国家不能在2028年前出台燃料基础设施第三方准入的强制性法规，则2030年欧盟ReFuelEU设定的0.7%合成燃料子目标几乎不可能通过本土产能实现，届时可能依靠灵活机制或从有限渠道高价采购。</p>
+<ul>
+<li><b>2030—2040年：有条件的初步商业化窗口</b></li>
+</ul>
+<p>  此阶段eSAF能否从“数吨级示范”跨越到“万吨级产线”取决于三个条件是否成熟：①主要枢纽机场完成燃料储存与加注系统的第三方公平接入改革；②绿氢成本随电解槽规模化和低电价区域的项目部署降至20元/kg以下（约2.8美元/kg）；③DAC或合格点源CO₂的认证与供应链建立。若条件均不满足，eSAF可能陷入“技术可用但商业不可投”的死亡谷。乐观情形下，2030年代中期可能出现数座十万吨级规模的商业化工厂（如鹿特丹项目扩建或中东北非光气资源区项目），但<b>将仅局限在欧洲西北部、中东等政策与可再生能源资源叠加最优的区域</b>，难以形成全球性供给。价格此时可能下降至传统航煤的3~4倍，仍依赖溢价机制或强制配额生存。</p>
+<ul>
+<li><b>2040—2050年：规模化拐点能否到来取决于基础设施民主化与碳市场</b></li>
+</ul>
+<p>  若机场燃料设施垄断在2035年前得到根本性改革，且绿氢成本进入1.5~2.0美元/kg区间，eSAF才有可能进入规模化部署。届时空客与波音新一代飞机的能源需求与全球碳价上升可能形成合力。但必须强调，<b>该阶段的规模化并非技术水到渠成的必然，而是制度变革的结果</b>。目前没有任何公开检索信息表明机场燃料基础设施所有权会自发开放，因此2040—2050年的eSAF占比和绝对产量存在极大的不确定性。乐观估计下可能承担航空业减排的20%~30%，悲观情景下仅为个位数百分比，与依赖结论中“需求空间存在极大不确定性”的判断一致。</p>
+<p><b>四、不确定性的核心来源</b></p>
+<ul>
+<li>基础设施改革进度：59%的主要机场存在接入限制，但迄今未见任何主要经济体的监管机构作出强制开放承诺。</li>
+<li>绿氢成本下降速度：高度关联各国可再生能源补贴与碳定价政策，而非纯技术进步。</li>
+<li>强制掺混政策的实际执行与反噬：欧洲已出现强制政策导致溢价畸高、行业抵触加大的先例，未来政策可能回调或引入价格上限。</li>
+<li>替代技术的竞争：若电池或氢能飞机对短程航线实现突破，将分流eSAF的需求紧迫性。</li>
+</ul>
+<p>综上，eSAF的商业化前景不是单一技术或成本问题，而是一场需要重塑燃料供应链权力结构、协调全球政策和容忍持续高溢价的系统变革；任何给出精确商业化年份的断言都缺少现状支持。</p><div class="sources"><h4>📎 检索来源</h4><ol><li><a href="https://chem.jgvogel.cn/c1554644.shtml" target="_blank" rel="noopener">亚洲航空业正加大力度推动可持续航空燃料产能规模化 - 最新要闻 - PROCESS流程工业</a> <a class="src-link" href="https://chem.jgvogel.cn/c1554644.shtml" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-09-29 · chem.jgvogel.cn</span></li><li><a href="https://news.qq.com/rain/a/20250925A04S3U00" target="_blank" rel="noopener">国际航协研究证实SAF技术的推广是净零碳排放的主要瓶颈_腾讯新闻</a> <a class="src-link" href="https://news.qq.com/rain/a/20250925A04S3U00" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-09-25 · 腾讯网</span></li><li><a href="https://www.sohu.com/a/858287684_121183600" target="_blank" rel="noopener">电子可持续航空燃料(eSAF),年复合增长率(CAGR)将达177.8%_市场_成本_全球</a> <a class="src-link" href="https://www.sohu.com/a/858287684_121183600" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-02-17 · 搜狐</span></li><li><a href="https://www.baogaobox.com/insights/251222000024045.html" target="_blank" rel="noopener">重排放行业转型密码:全球仅0.1%航空燃料实现绿色替代 - 远瞻慧库</a> <a class="src-link" href="https://www.baogaobox.com/insights/251222000024045.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-12-22 · www.baogaobox.com</span></li><li><a href="https://stock.stockstar.com/IG2025100800004732.shtml" target="_blank" rel="noopener">专访国际航协能源转型总监 Hemant Mistry:多措并举推进SAF商业化规模部署_股票频道_证券之星</a> <a class="src-link" href="https://stock.stockstar.com/IG2025100800004732.shtml" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-10-08 · 证券之星股票频道</span></li><li><a href="https://news.qq.com/rain/a/20251209A08AKK00" target="_blank" rel="noopener">预判明年SAF产量增长放缓 国际航协呼吁须在e-SAF强制要求出台前调整方向_腾讯新闻</a> <a class="src-link" href="https://news.qq.com/rain/a/20251209A08AKK00" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-12-09 · 腾讯网</span></li><li><a href="https://www.stcn.com/article/detail/3532428.html" target="_blank" rel="noopener">预判明年SAF产量增长放缓 国际航协呼吁须在e-SAF强制要求出台前调整方向</a> <a class="src-link" href="https://www.stcn.com/article/detail/3532428.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-12-09 · 证券时报</span></li><li><a href="https://www.waitang.com/report/78523162.html" target="_blank" rel="noopener">ICCT:2025年先进可持续航空燃料规模化推广行业障碍研究报告(英文版).pdf - 外唐智库</a> <a class="src-link" href="https://www.waitang.com/report/78523162.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-07-25 · 外唐智库</span></li><li><a href="https://www.sohu.com/a/823186952_121798711" target="_blank" rel="noopener">革命性技术即将亮相:PTC2024数智液压广场全面揭开,携手行业巨头探索未来趋势_智能_数字化_展览会</a> <a class="src-link" href="https://www.sohu.com/a/823186952_121798711" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-11-03 · 搜狐</span></li><li><a href="https://caijing.chinadaily.com.cn/a/202409/24/WS66f27d8ca310b59111d9ae0b.html" target="_blank" rel="noopener">CBB 2024:啤酒、水、饮料、乳品、调味品设备盛宴即将启幕! - 中国日报网</a> <a class="src-link" href="https://caijing.chinadaily.com.cn/a/202409/24/WS66f27d8ca310b59111d9ae0b.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-09-24 · China Daily</span></li><li><a href="https://www.toutiao.com/article/7454102281475195426/" target="_blank" rel="noopener">重磅发布2024年度清洁能源成果展映 - 今日头条</a> <a class="src-link" href="https://www.toutiao.com/article/7454102281475195426/" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-12-30 · 今日头条</span></li><li><a href="https://www.sohu.com/a/825014606_121752158" target="_blank" rel="noopener">2024年世界聚变展望报告-国际原子能机构_项目_系统_装置</a> <a class="src-link" href="https://www.sohu.com/a/825014606_121752158" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-11-09 · 搜狐</span></li><li><a href="https://www.allied-material.co.jp/en/event/ims2024.html" target="_blank" rel="noopener">IMS2024</a> <a class="src-link" href="https://www.allied-material.co.jp/en/event/ims2024.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-01-08 · www.allied-material.co.jp</span></li><li><a href="http://www.newcentury-expo.com/NewsDetail/5307865.html" target="_blank" rel="noopener">2024 年澳大利亚国际电力能源展</a> <a class="src-link" href="http://www.newcentury-expo.com/NewsDetail/5307865.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-11-18 · www.newcentury-expo.com</span></li><li><a href="https://xinyang.11467.com/info/25096612.htm" target="_blank" rel="noopener">2024EPOWER第二十四届中国全电展</a> <a class="src-link" href="https://xinyang.11467.com/info/25096612.htm" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2025-08-14 · 信阳企业网</span></li><li><a href="https://bao.hvacr.cn/202409_2110115.html" target="_blank" rel="noopener">参展预告  丹佛斯液冷解决方案即将亮相中国国际信息通信展览会-制冷快报</a> <a class="src-link" href="https://bao.hvacr.cn/202409_2110115.html" target="_blank" rel="noopener">[原文]</a><span class="src-meta">2024-09-23 · 制冷快报</span></li></ol></div></div></article></div></div>
+  <div class="nav">
+    <button class="arrow" id="prev">‹</button>
+    <div class="dots" id="dots"><button class="dot" data-i="0" title="深度思考"></button>
+<button class="dot" data-i="1" title="技术基础与合成路线对比"></button>
+<button class="dot" data-i="2" title="生产工艺与关键原料（CO₂、氢气）"></button>
+<button class="dot" data-i="3" title="产业链结构与成本模型"></button>
+<button class="dot" data-i="4" title="市场规模、需求与增长驱动"></button>
+<button class="dot" data-i="5" title="竞争格局与核心企业"></button>
+<button class="dot" data-i="6" title="政策与法规框架"></button>
+<button class="dot" data-i="7" title="商业化挑战与趋势研判"></button></div>
+    <span class="pos" id="pos"></span>
+    <button class="arrow" id="next">›</button>
+  </div>
+</section>
+</div>
+<script>
+(function(){
+  var N=8, i=0, track=document.getElementById("track");
+  var startX=0, startY=0, dx=0, dragging=false, pending=false, w=0;
+  var DRAG_TH=8;   // 横向移动超过此阈值(且横>纵)才算"拖动翻页",否则放行选词/纵向滚动
+  var LONG_PRESS=350, pressTimer=null, selectMode=false;   // 长按≥350ms未翻页 -> 选词模式,之后拖动只选字不翻页
+  var kps=[].slice.call(document.querySelectorAll("ul.kp li"));
+  var dots=[].slice.call(document.querySelectorAll(".dot"));
+  // 手机版:目录悬浮下拉(按钮由 JS 建,桌面端 CSS 隐藏);点要点/翻页后自动收起
+  var leftPanel=document.querySelector(".left");
+  var menuBtn=document.createElement("button");
+  menuBtn.className="menu-btn"; menuBtn.type="button"; menuBtn.textContent="☰ 目录";
+  document.body.appendChild(menuBtn);
+  menuBtn.onclick=function(){leftPanel.classList.toggle("open")};
+  function closeMenu(){leftPanel.classList.remove("open")}
+  function render(anim){
+    track.classList.toggle("snap",!!anim);
+    track.style.transform="translateX("+(-i*w+dx)+"px)";
+    document.getElementById("pos").textContent=(i+1)+" / "+N;
+    dots.forEach(function(d,k){d.classList.toggle("active",k===i)});
+    kps.forEach(function(li){li.classList.toggle("active",li.getAttribute("data-go")==String(i))});
+  }
+  function go(n){i=Math.max(0,Math.min(N-1,n));dx=0;render(true);closeMenu();}
+  function measure(){w=track.clientWidth;render(false)}
+  window.addEventListener("resize",measure);
+  document.getElementById("next").onclick=function(){go(i+1)};
+  document.getElementById("prev").onclick=function(){go(i-1)};
+  dots.forEach(function(d){d.onclick=function(){go(+d.getAttribute("data-i"))}});
+  kps.forEach(function(li){li.onclick=function(){go(+li.getAttribute("data-go"))}});
+  document.addEventListener("keydown",function(e){if(e.key==="ArrowRight")go(i+1);if(e.key==="ArrowLeft")go(i-1)});
+  // 拖拽(鼠标+触摸):意图阈值——横向够大才翻页,否则放行选词/纵向滚动
+  function down(x,y){pending=true;dragging=false;selectMode=false;startX=x;startY=y;dx=0;
+    clearTimeout(pressTimer);
+    pressTimer=setTimeout(function(){if(pending&&!dragging)selectMode=true;},LONG_PRESS);}  // 按住不动=想选字
+  function move(x,y){
+    if(!pending||selectMode)return;    // 选词模式:放行原生选择/调整选区,绝不翻页
+    var ddx=x-startX, ddy=y-startY;
+    if(!dragging){
+      if(Math.abs(ddx)<DRAG_TH || Math.abs(ddx)<=Math.abs(ddy))return;  // 没到阈值/非横向 -> 不拦
+      clearTimeout(pressTimer);        // 已确认是快速横拖=翻页手势,取消长按计时
+      dragging=true; track.classList.add("drag"); track.classList.remove("snap");
+      try{window.getSelection().removeAllRanges();}catch(e){}            // 进入拖动清掉误选
+    }
+    dx=ddx; render(false);
+  }
+  function up(){pending=false; clearTimeout(pressTimer);
+    if(!dragging){selectMode=false;return;} dragging=false; selectMode=false; track.classList.remove("drag");
+    var th=w*0.18; if(dx<-th)go(i+1); else if(dx>th)go(i-1); else {dx=0;render(true)} }
+  track.addEventListener("mousedown",function(e){down(e.clientX,e.clientY)});  // 不 preventDefault -> 可选词
+  window.addEventListener("mousemove",function(e){if(dragging)e.preventDefault();move(e.clientX,e.clientY)});
+  window.addEventListener("mouseup",up);
+  track.addEventListener("touchstart",function(e){down(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
+  track.addEventListener("touchmove",function(e){move(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
+  track.addEventListener("touchend",up);
+  measure();
+})();
+</script>
+</body></html>

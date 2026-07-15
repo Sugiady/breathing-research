@@ -22,6 +22,7 @@ CURATED = [
     ("algal-dha",              "藻油DHA",                   "产业研究"),
     ("green-hydrogen",         "绿氢下游应用",               "产业研究"),
     ("15th-plan-mfg",          "“十五五”规划纲要制造业相关",  "政策研究"),
+    ("esaf",                   "eSAF航空燃油",               "前沿能源"),
 ]
 
 def teaser(topic):
