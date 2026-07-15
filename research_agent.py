@@ -49,6 +49,13 @@ CFG = _load_cfg()
 # 最近一次运行的状态缓存(按主题),供"重试某步"用;服务器重启后可从 _plan.json 重建
 _RUNS = {}
 
+# 并发护栏:主流程(run_stream)跑动中拒绝 refine/retry/revert,防"边跑边被插改状态"的竞态。
+# 用递增序号而非布尔:打断重开时新 run 占用新序号,旧 run 收尾时按序号自检、不会误清新 run。
+_ACTIVE = {}   # topic -> 当前活跃 run 序号(0/缺失=空闲)
+_SEQ = [0]
+def is_running(topic):
+    return bool(_ACTIVE.get(topic))
+
 # ---------------- LLM 调用 ----------------
 PRO_MODEL = CFG["model"]
 
@@ -938,6 +945,9 @@ def import_plan(plan_obj):
 
 def _redo_step(topic, step_id, search_key, llm_key, feedback=""):
     """重跑/返工单步:feedback 非空即带用户反馈返工。返回 step_done / step_error 事件。"""
+    if is_running(topic):     # 主流程跑动中不允许插入改写(防竞态 bug③);让用户等这轮完或用"打断纠正"
+        return {"type": "busy", "id": step_id,
+                "msg": "研究进行中,请等这一轮跑完再返工;想改框架可用页面上方的「✋ 打断纠正」。"}
     try:
         st = _load_state(topic)
     except Exception as e:
@@ -985,6 +995,8 @@ def refine_one(topic, step_id, feedback, search_key=None, llm_key=None):
 def revert_one(topic, step_id):
     """还原某步到返工前的上一版(前端"还原上一版")。"""
     import render_html
+    if is_running(topic):
+        return {"type": "busy", "id": step_id, "msg": "研究进行中,请等这一轮跑完再操作。"}
     try:
         st = _load_state(topic)
     except Exception as e:
@@ -1181,6 +1193,7 @@ def run_stream(topic, llm_key=None, search_key=None, n_steps=7, corpus=None, res
     """生成器:逐事件 yield dict,供 SSE 推给前端。
     resume=True:断线续跑——复用缓存的 plan,跳过已完成步、补发其结果,接着跑剩下的(浏览器掉线不必重头)。"""
     import render_html
+    _SEQ[0] += 1; _myseq = _SEQ[0]; _ACTIVE[topic] = _myseq   # 标记本 topic 正在跑(护栏),收尾在 finally 清
     try:
         # —— 续跑:内存缓存优先;没有(如后端重启过)就从 _plan.json 重建,跳过已完成步 ——
         st = None
@@ -1307,6 +1320,9 @@ def run_stream(topic, llm_key=None, search_key=None, n_steps=7, corpus=None, res
         yield {"type": "done"}
     except Exception as e:
         yield {"type": "error", "msg": f"{type(e).__name__}: {e}"}
+    finally:
+        if _ACTIVE.get(topic) == _myseq:      # 仅当仍是本 run 时才清(打断重开后新 run 占位,别误清)
+            _ACTIVE[topic] = 0
 
 if __name__ == "__main__":
     args = sys.argv[1:]
