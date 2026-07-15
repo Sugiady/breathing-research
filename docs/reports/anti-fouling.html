@@ -631,6 +631,7 @@ ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px 
   var N=8, i=0, track=document.getElementById("track");
   var startX=0, startY=0, dx=0, dragging=false, pending=false, w=0;
   var DRAG_TH=8;   // 横向移动超过此阈值(且横>纵)才算"拖动翻页",否则放行选词/纵向滚动
+  var LONG_PRESS=350, pressTimer=null, selectMode=false;   // 长按≥350ms未翻页 -> 选词模式,之后拖动只选字不翻页
   var kps=[].slice.call(document.querySelectorAll("ul.kp li"));
   var dots=[].slice.call(document.querySelectorAll(".dot"));
   // 手机版:目录悬浮下拉(按钮由 JS 建,桌面端 CSS 隐藏);点要点/翻页后自动收起
@@ -656,18 +657,22 @@ ul.kp li.active{background:#fff;border-color:var(--green);box-shadow:0 2px 10px 
   kps.forEach(function(li){li.onclick=function(){go(+li.getAttribute("data-go"))}});
   document.addEventListener("keydown",function(e){if(e.key==="ArrowRight")go(i+1);if(e.key==="ArrowLeft")go(i-1)});
   // 拖拽(鼠标+触摸):意图阈值——横向够大才翻页,否则放行选词/纵向滚动
-  function down(x,y){pending=true;dragging=false;startX=x;startY=y;dx=0;}
+  function down(x,y){pending=true;dragging=false;selectMode=false;startX=x;startY=y;dx=0;
+    clearTimeout(pressTimer);
+    pressTimer=setTimeout(function(){if(pending&&!dragging)selectMode=true;},LONG_PRESS);}  // 按住不动=想选字
   function move(x,y){
-    if(!pending)return;
+    if(!pending||selectMode)return;    // 选词模式:放行原生选择/调整选区,绝不翻页
     var ddx=x-startX, ddy=y-startY;
     if(!dragging){
       if(Math.abs(ddx)<DRAG_TH || Math.abs(ddx)<=Math.abs(ddy))return;  // 没到阈值/非横向 -> 不拦
+      clearTimeout(pressTimer);        // 已确认是快速横拖=翻页手势,取消长按计时
       dragging=true; track.classList.add("drag"); track.classList.remove("snap");
       try{window.getSelection().removeAllRanges();}catch(e){}            // 进入拖动清掉误选
     }
     dx=ddx; render(false);
   }
-  function up(){pending=false; if(!dragging)return; dragging=false; track.classList.remove("drag");
+  function up(){pending=false; clearTimeout(pressTimer);
+    if(!dragging){selectMode=false;return;} dragging=false; selectMode=false; track.classList.remove("drag");
     var th=w*0.18; if(dx<-th)go(i+1); else if(dx>th)go(i-1); else {dx=0;render(true)} }
   track.addEventListener("mousedown",function(e){down(e.clientX,e.clientY)});  // 不 preventDefault -> 可选词
   window.addEventListener("mousemove",function(e){if(dragging)e.preventDefault();move(e.clientX,e.clientY)});

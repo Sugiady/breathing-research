@@ -18,7 +18,7 @@ import research_agent
 PORT = int(os.environ.get("PORT", "8770"))       # PaaS(Render 等)会注入 $PORT
 HOST = os.environ.get("HOST", "127.0.0.1")       # 本机默认只听 localhost;线上部署设 0.0.0.0
 ACCESS_PW = os.environ.get("ACCESS_PASSWORD", "")  # 设了 = 全站需口令;留空 = 不设防(本机默认)。别写进代码,在 Render 后台填。
-BUILD = "2026-07-14-gate"   # 改代码时改这里;GET /ping 可确认连的是不是新代码
+BUILD = "2026-07-15-jina"   # 改代码时改这里;GET /ping 可确认连的是不是新代码
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # 静音访问日志

@@ -216,8 +216,24 @@ def _baidu_items(query, count=6, news=True, retries=2):
     return []
 
 _URL_RE = re.compile(r"https?://[^\s)\]）】,，、；;\"']+")
-def _fetch_one(u, per=2500, timeout=12):
-    """抓单个 URL 正文并剥成纯文本,返回 (title, body, item)。抓取失败抛异常由调用方处理。"""
+
+# Jina Reader:r.jina.ai/<URL> 服务端渲染取正文,免费(无 key 有限速),顺带解 PDF/JS 渲染页/坏证书站。
+# 定位=兜底而非首发:普通页 bounded curl 更快,只有 curl 拿不到(空壳/PDF/封站)时才请 Jina 救场,兼顾速度与覆盖。
+USE_JINA = True
+_JINA_BASE = "https://r.jina.ai/"
+
+def _looks_pdf(u):
+    ul = (u or "").lower()
+    return ul.endswith(".pdf") or ".pdf?" in ul or "filetype=pdf" in ul
+
+def _strip_html(raw, per):
+    body = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", raw)
+    body = re.sub(r"(?s)<[^>]+>", " ", body)
+    body = re.sub(r"&[a-z#0-9]+;", " ", body)
+    return re.sub(r"\s+", " ", body).strip()[:per]
+
+def _fetch_curl(u, per=2500, timeout=12):
+    """原生抓取:bounded urllib + 宽松 SSL,剥成纯文本。返回 (title, body, item);失败抛异常。"""
     req = urllib.request.Request(u, headers={
         "User-Agent": _BD_UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -225,12 +241,53 @@ def _fetch_one(u, per=2500, timeout=12):
     with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
         raw = r.read(200000).decode("utf-8", "ignore")
     title = (re.search(r"<title[^>]*>(.*?)</title>", raw, re.S | re.I) or [None, ""])[1].strip()[:120]
-    body = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", raw)
-    body = re.sub(r"(?s)<[^>]+>", " ", body)
-    body = re.sub(r"&[a-z#0-9]+;", " ", body)
-    body = re.sub(r"\s+", " ", body).strip()[:per]
+    body = _strip_html(raw, per)
     item = {"name": title or u, "url": u, "date": "",
             "site": re.sub(r"^https?://(www\.)?", "", u).split("/")[0], "summary": ""}
+    return title, body, item
+
+def _fetch_via_jina(u, per=2500, timeout=18):
+    """Jina Reader 取正文(服务端渲染)。成功返回 (title, body, item);失败/太短返回 None。"""
+    try:
+        req = urllib.request.Request(_JINA_BASE + u, headers={
+            "User-Agent": _BD_UA, "Accept": "text/plain", "X-Return-Format": "text"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read(500000).decode("utf-8", "ignore")
+    except Exception:
+        return None
+    if not raw or len(raw) < 200:
+        return None
+    title = ""
+    m = re.search(r"^Title:\s*(.+)$", raw, re.M)     # Jina 头部有 Title:/URL Source:/Markdown Content:
+    if m:
+        title = m.group(1).strip()[:120]
+    mc = raw.find("Markdown Content:")
+    body = raw[mc + len("Markdown Content:"):] if mc >= 0 else raw
+    body = re.sub(r"\s+", " ", body).strip()[:per]
+    if len(body) < 200:
+        return None
+    item = {"name": title or u, "url": u, "date": "",
+            "site": re.sub(r"^https?://(www\.)?", "", u).split("/")[0], "summary": ""}
+    return title, body, item
+
+def _fetch_one(u, per=2500, timeout=12):
+    """抓单页正文,返回 (title, body, item)。策略:bounded curl 先行(快,治大多数页);
+    拿不到/像空壳/是 PDF -> Jina Reader 兜底(慢但能啃 PDF/JS 渲染页/封站)。都失败抛异常由调用方跳过。"""
+    if USE_JINA and _looks_pdf(u):                    # PDF:curl 抓到的是压缩流乱码,直接走 Jina
+        j = _fetch_via_jina(u, per, timeout + 8)
+        if j:
+            return j
+    title, body, item = "", "", None
+    try:
+        title, body, item = _fetch_curl(u, per, timeout)
+    except Exception:
+        item = None
+    if USE_JINA and len(body) < 200:                  # curl 失败或只拿到空壳(JS渲染/封站)-> Jina 救场
+        j = _fetch_via_jina(u, per, timeout + 8)
+        if j:
+            return j
+    if item is None:
+        raise RuntimeError(f"fetch failed: {u}")
     return title, body, item
 
 def _fetch_urls(text, limit=3):
